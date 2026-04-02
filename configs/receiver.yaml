@@ -1,0 +1,4 @@
+sample_rate: 2000000
+center_freq: 2400000000
+frame_size: 4096
+source_type: sim

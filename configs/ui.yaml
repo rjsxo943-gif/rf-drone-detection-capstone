@@ -1,0 +1,4 @@
+refresh_ms: 100
+show_spectrogram: true
+show_detector_status: true
+show_aoa: true

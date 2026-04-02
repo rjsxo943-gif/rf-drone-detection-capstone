@@ -1,0 +1,4 @@
+input_size: 1024
+num_classes: 4
+model_path: models/checkpoints/model.keras
+tflite_path: models/tflite/model.tflite
