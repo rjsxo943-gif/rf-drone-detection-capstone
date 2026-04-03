@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>RF 드론탐지 — 코드 작성 우선순위</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0a0f1e; color: #e2e8f0; font-family: 'Courier New', monospace; padding: 20px; min-height: 100vh; }
+h1 { font-size: 17px; color: #f1f5f9; margin-bottom: 4px; }
+.sub { font-size: 11px; color: #64748b; margin-bottom: 12px; }
+.badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.badge { background: #111827; border: 1px solid #1e293b; border-radius: 6px; padding: 4px 10px; font-size: 11px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.filters input { background: #111827; border: 1px solid #1e293b; border-radius: 6px; padding: 6px 12px; color: #e2e8f0; font-size: 12px; outline: none; width: 200px; font-family: inherit; }
+.filters button { background: #111827; border: 1px solid #1e293b; border-radius: 5px; padding: 4px 10px; color: #64748b; font-size: 11px; cursor: pointer; font-family: inherit; }
+.filters button.active { background: #1e3a5f; border-color: #3b82f6; color: #60a5fa; }
+.filters button.active-phase { background: #1a2a1a; border-color: #4ade80; color: #4ade80; }
+.filters .reset { background: #1a1a2e; border-color: #2d2d4e; color: #94a3b8; }
+.filter-group { display: flex; gap: 4px; flex-wrap: wrap; }
+.thead { display: grid; grid-template-columns: 36px 40px 1fr 70px 1.8fr 140px; background: #0d1424; border: 1px solid #1e293b; border-radius: 8px 8px 0 0; padding: 8px 12px; font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: .08em; }
+.tbody { border: 1px solid #1e293b; border-top: none; border-radius: 0 0 8px 8px; overflow: hidden; }
+.row { display: grid; grid-template-columns: 36px 40px 1fr 70px 1.8fr 140px; padding: 9px 12px; border-bottom: 1px solid #141e30; align-items: center; cursor: grab; border-left: 2px solid transparent; transition: background .1s; }
+.row:nth-child(even) { background: #0c1220; }
+.row:nth-child(odd) { background: #0a0f1e; }
+.row.drag-over { background: #0a1e14; border-left-color: #4ade80; }
+.row.dragging { opacity: 0.4; }
+.handle { color: #334155; font-size: 14px; user-select: none; }
+.rank-hot { color: #f97316; font-weight: 700; font-size: 12px; }
+.rank-mid { color: #fbbf24; font-weight: 700; font-size: 12px; }
+.rank-low { color: #475569; font-weight: 700; font-size: 12px; }
+.path-dir { color: #475569; font-size: 11px; }
+.path-file { color: #f1f5f9; font-weight: 600; font-size: 11px; }
+.type-badge { border-radius: 4px; padding: 2px 5px; font-size: 10px; white-space: nowrap; border: 1px solid; }
+.reason { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+.phase-badge { font-size: 10px; border-radius: 4px; padding: 2px 6px; white-space: nowrap; border: 1px solid; }
+.footer { margin-top: 10px; font-size: 10px; color: #334155; text-align: right; }
+.empty { padding: 32px; text-align: center; color: #334155; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+  <div style="background:linear-gradient(135deg,#3b82f6,#06b6d4);border-radius:8px;padding:6px 10px;font-size:18px">📡</div>
+  <div>
+    <h1>RF 드론탐지 — 코드 작성 우선순위</h1>
+    <div class="sub">드래그하여 순서 변경 가능</div>
+  </div>
+</div>
+
+<div class="badges" id="badges"></div>
+
+<div class="filters">
+  <input id="search" placeholder="경로 / 이유 검색..." oninput="render()">
+  <div class="filter-group" id="typeFilters"></div>
+  <div class="filter-group" id="phaseFilters"></div>
+  <button class="reset" onclick="resetAll()">↺ 초기화</button>
+</div>
+
+<div class="thead">
+  <div></div><div>#</div><div>경로</div><div>유형</div><div>이유</div><div>단계</div>
+</div>
+<div class="tbody" id="tbody"></div>
+<div class="footer" id="footer"></div>
+
+<script>
+const typeColors = {
+  설정:    {bg:"#1a2744",text:"#60a5fa",border:"#2a3f6f"},
+  코드:    {bg:"#1a2d1a",text:"#4ade80",border:"#2a4d2a"},
+  테스트:  {bg:"#2d1a2d",text:"#c084fc",border:"#4d2a4d"},
+  노트북:  {bg:"#2d2a1a",text:"#fbbf24",border:"#4d4a2a"},
+  폴더:    {bg:"#1a2a2d",text:"#22d3ee",border:"#2a4a4d"},
+  문서:    {bg:"#2d1a1a",text:"#f87171",border:"#4d2a2a"},
+  스크립트:{bg:"#2a1a2d",text:"#e879f9",border:"#4a2a4d"},
+  기타:    {bg:"#2a2a1a",text:"#a3e635",border:"#4a4a2a"},
+};
+const phaseConfig = {
+  now:  {label:"🟢 지금 착수",   color:"#4ade80"},
+  hw:   {label:"🟡 HW 도착 후",  color:"#fbbf24"},
+  auto: {label:"🔵 자동 생성",   color:"#60a5fa"},
+};
+const initialData = [
+  {id:1,  path:"src/core/types.py",                       type:"코드",    reason:"IQFrame, DetectionResult 등 공통 타입 — 없으면 모듈 간 인터페이스 제각각", phase:"now"},
+  {id:2,  path:"src/core/config.py",                      type:"코드",    reason:"YAML 로더 — 모든 모듈이 configs/ 읽는 단일 창구",                          phase:"now"},
+  {id:3,  path:"src/core/logger.py",                      type:"코드",    reason:"공통 로깅 — 전 모듈 공유",                                               phase:"now"},
+  {id:4,  path:"configs/receiver.yaml",                   type:"설정",    reason:"샘플링 레이트, 중심주파수 파라미터 정의",                                    phase:"now"},
+  {id:5,  path:"configs/detect.yaml",                     type:"설정",    reason:"임계치, 윈도우 크기 파라미터 정의",                                         phase:"now"},
+  {id:6,  path:"configs/ml.yaml",                         type:"설정",    reason:"CNN 하이퍼파라미터, 클래스 레이블 정의",                                    phase:"now"},
+  {id:7,  path:"configs/aoa.yaml",                        type:"설정",    reason:"안테나 간격, 파장, phase_offset 저장",                                    phase:"now"},
+  {id:8,  path:"configs/ui.yaml",                         type:"설정",    reason:"대시보드 레이아웃, 갱신 주기 정의",                                         phase:"now"},
+  {id:9,  path:"src/receiver/sim_receiver.py",            type:"코드",    reason:"가상 IQ 생성 — 하드웨어 없이 전체 파이프라인 테스트 가능",                     phase:"now"},
+  {id:10, path:"src/receiver/raw_file_receiver.py",       type:"코드",    reason:"IQ 파일 재생 — 녹화 데이터로 파이프라인 테스트",                             phase:"now"},
+  {id:11, path:"src/preprocess/framing.py",               type:"코드",    reason:"연속 IQ 스트림 → 고정길이 프레임 분할 — 이후 전부 여기 의존",                  phase:"now"},
+  {id:12, path:"src/preprocess/dc_blocker.py",            type:"코드",    reason:"DC 오프셋 제거 — PLUTO+ 직접변환 수신기 특성",                              phase:"now"},
+  {id:13, path:"src/preprocess/channel_filter.py",        type:"코드",    reason:"2.4GHz 관심 대역 필터 — ML 입력 품질 직결",                               phase:"now"},
+  {id:14, path:"src/preprocess/iq_normalizer.py",         type:"코드",    reason:"IQ 진폭 정규화 — CNN 학습 안정성 향상",                                   phase:"now"},
+  {id:15, path:"src/features/window.py",                  type:"코드",    reason:"Hanning/Hamming 윈도우 — FFT 전 스펙트럼 누설 억제",                       phase:"now"},
+  {id:16, path:"src/features/fft.py",                     type:"코드",    reason:"FFT 변환, 로그 스케일 — 파이프라인 핵심",                                  phase:"now"},
+  {id:17, path:"src/features/spectrogram.py",             type:"코드",    reason:"시각화용 스펙트로그램 — 대시보드 좌측 패널",                                  phase:"now"},
+  {id:18, path:"src/detect/energy_detector.py",           type:"코드",    reason:"CFAR 유사 에너지 검출 — ML 전 1차 필터",                                  phase:"now"},
+  {id:19, path:"tests/test_fft.py",                       type:"테스트",  reason:"FFT 정확도 단위 테스트 — 이후 전부 FFT에 의존",                              phase:"now"},
+  {id:20, path:"tests/test_detector.py",                  type:"테스트",  reason:"탐지기 FAR/탐지율 검증",                                                  phase:"now"},
+  {id:21, path:"tests/test_preprocess.py",                type:"테스트",  reason:"전처리 파이프라인 검증",                                                   phase:"now"},
+  {id:22, path:"notebooks/01_fft_window_experiment.ipynb",type:"노트북",  reason:"FFT 포인트 수, 윈도우 함수별 분해능 비교 실험",                               phase:"now"},
+  {id:23, path:"notebooks/02_detector_tuning.ipynb",      type:"노트북",  reason:"임계치 k·σ 값 튜닝 실험",                                                phase:"now"},
+  {id:24, path:"scripts/preprocess_dataset.py",           type:"스크립트",reason:"공개 데이터셋 raw → processed 변환 자동화",                                phase:"now"},
+  {id:25, path:"src/ml/train_1dcnn.py",                   type:"코드",    reason:"공개 데이터셋으로 1D CNN 학습",                                            phase:"now"},
+  {id:26, path:"notebooks/03_cnn_training.ipynb",         type:"노트북",  reason:"혼동행렬, F1-score 실험 기록",                                             phase:"now"},
+  {id:27, path:"models/artifacts/",                       type:"폴더",    reason:"confusion matrix, F1 리포트 저장",                                       phase:"now"},
+  {id:28, path:"src/ml/export_tflite.py",                 type:"코드",    reason:"학습 모델 → TFLite INT8 양자화 변환",                                     phase:"now"},
+  {id:29, path:"src/ml/infer_tflite.py",                  type:"코드",    reason:"TFLite 추론 — 라즈베리파이4B 배포 전 PC 검증",                             phase:"now"},
+  {id:30, path:"notebooks/04_tflite_validation.ipynb",    type:"노트북",  reason:"양자화 전후 정확도 드롭 비교",                                               phase:"now"},
+  {id:31, path:"src/aoa/phase_diff.py",                   type:"코드",    reason:"2채널 위상차 계산 — 시뮬레이션 IQ로 먼저 검증",                              phase:"now"},
+  {id:32, path:"src/aoa/angle_estimator.py",              type:"코드",    reason:"arcsin 공식으로 방위각 산출 + 오프셋 보정",                                 phase:"now"},
+  {id:33, path:"tests/test_aoa.py",                       type:"테스트",  reason:"인위적 위상차 주입 → 각도 복원 정확도 검증",                                  phase:"now"},
+  {id:34, path:"notebooks/05_aoa_simulation.ipynb",       type:"노트북",  reason:"AoA 시뮬레이션 실험 기록",                                                 phase:"now"},
+  {id:35, path:"src/ui/dashboard.py",                     type:"코드",    reason:"PyQt5 4분할 대시보드 — 파이프라인 완성 후",                                 phase:"now"},
+  {id:36, path:"src/core/pipeline.py",                    type:"코드",    reason:"전체 모듈 연결 — 개별 모듈 완성 후 작성",                                   phase:"now"},
+  {id:37, path:"tests/test_pipeline.py",                  type:"테스트",  reason:"엔드투엔드 파이프라인 통합 테스트",                                           phase:"now"},
+  {id:38, path:"scripts/run_pipeline.py",                 type:"스크립트",reason:"전체 파이프라인 실행 진입점 — 모든 모듈 완성 후",                              phase:"now"},
+  {id:39, path:"docs/experiments/",                       type:"문서",    reason:"실험 맥락 Markdown 정리 — 보고서 작성 시 근거 자료",                         phase:"now"},
+  {id:40, path:"docs/presentation/",                      type:"문서",    reason:"발표 PPT — 구현 완료 후 작성",                                             phase:"now"},
+  {id:41, path:"src/receiver/pluto_receiver.py",          type:"코드",    reason:"PLUTO+ 2채널 실측 수신 — HW 도착 후 sim_receiver와 교체",                  phase:"hw"},
+  {id:42, path:"scripts/calibrate.py",                    type:"스크립트",reason:"위상 오프셋 캘리브레이션 자동화 — PLUTO+ 필요",                              phase:"hw"},
+  {id:43, path:"data/raw_iq/pluto/",                      type:"폴더",    reason:"PLUTO+로 수집한 실측 IQ 저장",                                             phase:"hw"},
+  {id:44, path:"notebooks/05_aoa_simulation.ipynb (실측)",type:"노트북",  reason:"실제 위상 노이즈 환경에서 AoA 정밀도 측정",                                   phase:"hw"},
+  {id:45, path:"gnu_radio/drone_detect.grc",              type:"기타",    reason:"GNU Radio 플로우그래프 — PLUTO+ 연결 후 구성",                             phase:"hw"},
+  {id:46, path:"logs/",                                   type:"폴더",    reason:"실행 로그 자동 저장 — 파이프라인 돌면 자동 생성",                            phase:"auto"},
+  {id:47, path:"outputs/runs/",                           type:"폴더",    reason:"실행 결과 자동 저장",                                                      phase:"auto"},
+];
+
+let items = initialData.map((d,i) => ({...d, rank: i+1}));
+let filterType = "전체";
+let filterPhase = "전체";
+let dragSrcIdx = null;
+
+function resetAll() {
+  items = initialData.map((d,i) => ({...d, rank: i+1}));
+  filterType = "전체"; filterPhase = "전체";
+  document.getElementById("search").value = "";
+  buildFilters(); render();
+}
+
+function buildFilters() {
+  const tf = document.getElementById("typeFilters");
+  const pf = document.getElementById("phaseFilters");
+  const types = ["전체", ...Object.keys(typeColors)];
+  const phases = ["전체", "now", "hw", "auto"];
+  tf.innerHTML = types.map(t =>
+    `<button onclick="setType('${t}')" class="${filterType===t?'active':''}">${t}</button>`
+  ).join("");
+  pf.innerHTML = phases.map(p =>
+    `<button onclick="setPhase('${p}')" class="${filterPhase===p?'active-phase':''}">${p==='전체'?'전체':phaseConfig[p].label}</button>`
+  ).join("");
+}
+
+function setType(t) { filterType = t; buildFilters(); render(); }
+function setPhase(p) { filterPhase = p; buildFilters(); render(); }
+
+function getFiltered() {
+  const q = document.getElementById("search").value.toLowerCase();
+  return items.filter(item => {
+    const mt = filterType === "전체" || item.type === filterType;
+    const mp = filterPhase === "전체" || item.phase === filterPhase;
+    const ms = item.path.toLowerCase().includes(q) || item.reason.toLowerCase().includes(q);
+    return mt && mp && ms;
+  });
+}
+
+function render() {
+  const filtered = getFiltered();
+  const tbody = document.getElementById("tbody");
+
+  // badges
+  document.getElementById("badges").innerHTML =
+    Object.entries(phaseConfig).map(([k,v]) =>
+      `<div class="badge" style="color:${v.color}">${v.label} · ${items.filter(i=>i.phase===k).length}개</div>`
+    ).join("") +
+    `<div class="badge" style="color:#94a3b8">총 ${items.length}개</div>`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<div class="empty">검색 결과 없음</div>`;
+    document.getElementById("footer").textContent = "0개 표시";
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((item, idx) => {
+    const tc = typeColors[item.type] || {bg:"#1a1a2a",text:"#94a3b8",border:"#2a2a3a"};
+    const pc = phaseConfig[item.phase];
+    const parts = item.path.split("/");
+    const file = parts.pop();
+    const dir = parts.length ? parts.join("/") + "/" : "";
+    const rankClass = item.rank <= 5 ? "rank-hot" : item.rank <= 15 ? "rank-mid" : "rank-low";
+    return `
+      <div class="row" draggable="true" data-id="${item.id}"
+        ondragstart="onDragStart(event,${item.id})"
+        ondragenter="onDragEnter(event,${item.id})"
+        ondragover="event.preventDefault()"
+        ondragend="onDragEnd(event)"
+        style="background:${idx%2===0?'#0c1220':'#0a0f1e'}">
+        <div class="handle">⣿</div>
+        <div class="${rankClass}">${item.rank}</div>
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px">
+          <span class="path-dir">${dir}</span><span class="path-file">${file}</span>
+        </div>
+        <div><span class="type-badge" style="background:${tc.bg};color:${tc.text};border-color:${tc.border}">${item.type}</span></div>
+        <div class="reason">${item.reason}</div>
+        <div><span class="phase-badge" style="color:${pc.color};border-color:${pc.color}44;background:#0a0f1e">${pc.label}</span></div>
+      </div>`;
+  }).join("");
+
+  document.getElementById("footer").textContent =
+    `${filtered.length}개 표시 · 드래그로 순서 재정렬 · ↺ 초기화로 원래대로`;
+}
+
+let dragId = null;
+function onDragStart(e, id) {
+  dragId = id;
+  setTimeout(() => e.target.classList.add("dragging"), 0);
+}
+function onDragEnter(e, id) {
+  if (dragId === null || dragId === id) return;
+  const fromIdx = items.findIndex(i => i.id === dragId);
+  const toIdx   = items.findIndex(i => i.id === id);
+  const newItems = [...items];
+  const [removed] = newItems.splice(fromIdx, 1);
+  newItems.splice(toIdx, 0, removed);
+  items = newItems.map((item, idx) => ({...item, rank: idx+1}));
+  render();
+}
+function onDragEnd(e) {
+  dragId = null;
+  document.querySelectorAll(".dragging").forEach(el => el.classList.remove("dragging"));
+}
+
+buildFilters();
+render();
+</script>
+
+</body>
+</html>
