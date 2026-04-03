@@ -1,28 +1,92 @@
-data/raw_iq/*
-!data/raw_iq/.gitkeep
-
-data/processed/*
-!data/processed/.gitkeep
-
-data/labels/*
-!data/labels/.gitkeep
-
-models/checkpoints/*
-!models/checkpoints/.gitkeep
-
-models/tflite/*
-!models/tflite/.gitkeep
-
-logs/*
-!logs/.gitkeep
-
+# =========================
+# Python
+# =========================
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 *.pyo
-*.ipynb_checkpoints
-.env
+
+# Virtual environment
 .venv/
 venv/
+env/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Build / package
+build/
+dist/
+*.egg-info/
+
+# =========================
+# Editor / IDE
+# =========================
 .vscode/
 .idea/
+
+# =========================
+# OS files
+# =========================
 .DS_Store
+Thumbs.db
+
+# =========================
+# Environment
+# =========================
+.env
+
+# =========================
+# Logs
+# =========================
+logs/*
+!logs/.gitkeep
+*.log
+
+# =========================
+# Data
+# =========================
+data/datasets/
+data/raw_iq/*
+data/processed/*
+data/labels/*
+
+!data/datasets/.gitkeep
+!data/raw_iq/.gitkeep
+!data/processed/.gitkeep
+!data/labels/.gitkeep
+
+# =========================
+# Models
+# =========================
+models/checkpoints/*
+models/tflite/*
+
+!models/checkpoints/.gitkeep
+!models/tflite/.gitkeep
+
+# =========================
+# Outputs
+# =========================
+outputs/runs/
+outputs/predictions/
+outputs/exports/
+
+!outputs/runs/.gitkeep
+!outputs/predictions/.gitkeep
+!outputs/exports/.gitkeep
+
+# =========================
+# Calibration
+# =========================
+configs/aoa.yaml
+
+# =========================
+# Jupyter / temp
+# =========================
+*.tmp
+*.temp
