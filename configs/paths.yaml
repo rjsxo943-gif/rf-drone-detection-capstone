@@ -1,0 +1,19 @@
+data:
+  external: data/external
+  raw_iq: data/raw_iq
+  synthetic: data/synthetic
+  interim: data/interim
+  processed: data/processed
+  labels: data/labels
+  splits: data/splits
+
+models:
+  checkpoints: models/checkpoints
+  reports: models/reports
+  tflite: models/tflite
+  metadata: models/metadata
+
+outputs:
+  figures: outputs/figures
+  predictions: outputs/predictions
+  runs: outputs/runs

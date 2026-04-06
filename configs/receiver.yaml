@@ -1,4 +1,12 @@
+source_type: sim
 sample_rate: 2000000
 center_freq: 2400000000
-frame_size: 4096
-source_type: sim
+num_samples: 262144
+
+sim:
+  tone_freq_norm: 0.08
+  noise_std: 0.08
+  burst_amplitude: 2.5
+  burst_period: 4096
+  burst_length: 768
+  seed: 42

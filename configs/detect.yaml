@@ -1,3 +1,4 @@
-fft_size: 1024
-threshold_k: 3.0
-min_consecutive_frames: 3
+frame_size: 1024
+hop_size: 512
+window: hann
+threshold_multiplier: 3.0
