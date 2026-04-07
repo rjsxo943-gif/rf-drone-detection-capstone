@@ -1,4 +1,4 @@
 frame_size: 1024
 hop_size: 512
 window: hann
-threshold_multiplier: 3.0
+threshold_multiplier: 5.0

@@ -15,6 +15,7 @@ from src.preprocess.iq_normalizer import normalize_iq
 from src.preprocess.framing import frame_signal
 from src.features.fft import compute_fft_magnitude
 from src.detect.energy_detector import EnergyDetector
+from src.ui.result_plotter import save_energy_plot
 
 
 def main() -> None:
@@ -80,6 +81,14 @@ def main() -> None:
         "threshold": float(detector.threshold),
         "detection_ratio": float(np.mean(detections)) if len(detections) > 0 else 0.0,
     }
+
+    save_energy_plot(
+        energies=frame_energies,
+        threshold=detector.threshold,
+        detections=detections,
+        save_path=run_dir / "energy_plot.png",
+        title="Energy Detector Output",
+    )
 
     with (run_dir / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
