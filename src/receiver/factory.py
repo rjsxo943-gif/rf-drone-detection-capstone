@@ -45,7 +45,6 @@ def build_receiver(receiver_cfg: Mapping[str, Any]):
         return SimReceiver(
             sample_rate=cfg["sample_rate"],
             center_freq=cfg["center_freq"],
-            num_samples=cfg["num_samples"],
             tone_freq_norm=sim_cfg.get("tone_freq_norm", 0.08),
             noise_std=sim_cfg.get("noise_std", 0.08),
             burst_amplitude=sim_cfg.get("burst_amplitude", 1.5),

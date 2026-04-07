@@ -9,7 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.core.config import load_all_configs
-from src.receiver.sim_receiver import SimReceiver
+from src.receiver.factory import build_receiver
 from src.preprocess.dc_blocker import remove_dc
 from src.preprocess.iq_normalizer import normalize_iq
 from src.preprocess.framing import frame_signal
@@ -25,21 +25,7 @@ def main() -> None:
     detect_cfg = cfg["detect"]
     paths_cfg = cfg["paths"]
 
-    if receiver_cfg["source_type"] != "sim":
-        raise NotImplementedError("현재 최소 동작 버전은 sim만 지원함")
-
-    sim_cfg = receiver_cfg["sim"]
-
-    receiver = SimReceiver(
-        sample_rate=receiver_cfg["sample_rate"],
-        center_freq=receiver_cfg["center_freq"],
-        tone_freq_norm=sim_cfg["tone_freq_norm"],
-        noise_std=sim_cfg["noise_std"],
-        burst_amplitude=sim_cfg["burst_amplitude"],
-        burst_period=sim_cfg["burst_period"],
-        burst_length=sim_cfg["burst_length"],
-        seed=sim_cfg["seed"],
-    )
+    receiver = build_receiver(receiver_cfg)
 
     iq = receiver.read_samples(receiver_cfg["num_samples"])
     iq = remove_dc(iq)
