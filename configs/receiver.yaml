@@ -1,7 +1,25 @@
+# configs/receiver.yaml
+#
+# 이 파일은 이번 실행에서 어떤 입력 소스를 사용할지 정하는 설정 파일이다.
+#
+# source_type 사용법:
+# - sim  : synthetic IQ 생성
+# - file : 저장된 IQ 파일(.npy) 읽기
+# - sdr  : 실제 SDR 입력(나중에 구현)
+#
+# 주의:
+# - source_type: file 일 때는 file_path를 사용
+# - source_type: sim 일 때는 sim 블록의 값을 사용
+# - center_freq는 지금 sim 파이프라인에서는 직접 안 써도, 나중에 SDR 연결용으로 유지하는 게 좋다
+
 source_type: sim
+
 sample_rate: 2000000
 center_freq: 2400000000
 num_samples: 262144
+
+# source_type: file 일 때 사용할 파일 경로
+file_path: data/raw_iq/test.npy
 
 sim:
   tone_freq_norm: 0.08
@@ -10,3 +28,8 @@ sim:
   burst_period: 4096
   burst_length: 768
   seed: 42
+
+# 나중에 실제 SDR 붙일 때 확장
+sdr:
+  device: hackrf
+  gain: 20
