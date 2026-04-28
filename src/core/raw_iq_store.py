@@ -1,24 +1,20 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-
-def _now_string() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-def _to_complex64(x: np.ndarray, name: str) -> np.ndarray:
-    x = np.asarray(x)
-
-    if x.ndim != 1:
-        raise ValueError(f"{name} must be 1-D complex IQ array. got shape={x.shape}")
-
-    return x.astype(np.complex64)
+from .utils import (
+    check_same_shape,
+    dumps_json,
+    format_block_filename,
+    loads_json,
+    now_iso,
+    now_string,
+    save_json,
+    to_complex64_1d,
+)
 
 
 def create_raw_iq_session(
@@ -35,7 +31,7 @@ def create_raw_iq_session(
     """
 
     root_dir = Path(root_dir)
-    session_id = session_name or f"{label}_{_now_string()}"
+    session_id = session_name or f"{label}_{now_string()}"
 
     session_dir = root_dir / label / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -43,17 +39,14 @@ def create_raw_iq_session(
     session_meta = {
         "session_id": session_id,
         "label": label,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_at": now_iso(timespec="seconds"),
         "description": "Raw complex IQ capture session",
     }
 
     if metadata:
         session_meta.update(metadata)
 
-    meta_path = session_dir / "session_meta.json"
-
-    with meta_path.open("w", encoding="utf-8") as f:
-        json.dump(session_meta, f, indent=2, ensure_ascii=False)
+    save_json(session_dir / "session_meta.json", session_meta)
 
     return session_dir
 
@@ -92,18 +85,19 @@ def save_raw_iq_block(
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    rx0_iq = _to_complex64(rx0_iq, "rx0_iq")
-    rx1_iq = _to_complex64(rx1_iq, "rx1_iq")
+    block_index = int(block_index)
 
-    if rx0_iq.shape != rx1_iq.shape:
-        raise ValueError(
-            f"rx0_iq and rx1_iq must have same shape. "
-            f"got rx0={rx0_iq.shape}, rx1={rx1_iq.shape}"
-        )
+    if block_index < 0:
+        raise ValueError(f"block_index must be non-negative. got {block_index}")
 
-    metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+    rx0_iq = to_complex64_1d(rx0_iq, "rx0_iq")
+    rx1_iq = to_complex64_1d(rx1_iq, "rx1_iq")
 
-    output_path = session_dir / f"block_{block_index:06d}.npz"
+    check_same_shape(rx0_iq, rx1_iq, "rx0_iq", "rx1_iq")
+
+    metadata_json = dumps_json(metadata)
+
+    output_path = session_dir / format_block_filename(block_index)
 
     # raw IQ는 압축해도 용량이 크게 줄지 않고 저장 속도만 느려질 수 있어서
     # np.savez_compressed 대신 np.savez 사용
@@ -115,7 +109,7 @@ def save_raw_iq_block(
         sample_rate=np.array(sample_rate, dtype=np.float64),
         center_freq=np.array(center_freq, dtype=np.float64),
         label=np.array(label),
-        timestamp=np.array(datetime.now().isoformat(timespec="milliseconds")),
+        timestamp=np.array(now_iso(timespec="milliseconds")),
         metadata_json=np.array(metadata_json),
     )
 
@@ -132,17 +126,16 @@ def load_raw_iq_block(input_path: str | Path) -> dict[str, Any]:
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {input_path}")
 
-    data = np.load(input_path, allow_pickle=False)
+    with np.load(input_path, allow_pickle=False) as data:
+        metadata = loads_json(data["metadata_json"])
 
-    metadata_json = str(data["metadata_json"].item())
-
-    return {
-        "rx0_iq": data["rx0_iq"],
-        "rx1_iq": data["rx1_iq"],
-        "block_index": int(data["block_index"]),
-        "sample_rate": float(data["sample_rate"]),
-        "center_freq": float(data["center_freq"]),
-        "label": str(data["label"].item()),
-        "timestamp": str(data["timestamp"].item()),
-        "metadata": json.loads(metadata_json),
-    }
+        return {
+            "rx0_iq": data["rx0_iq"].astype(np.complex64, copy=False),
+            "rx1_iq": data["rx1_iq"].astype(np.complex64, copy=False),
+            "block_index": int(data["block_index"]),
+            "sample_rate": float(data["sample_rate"]),
+            "center_freq": float(data["center_freq"]),
+            "label": str(data["label"].item()),
+            "timestamp": str(data["timestamp"].item()),
+            "metadata": metadata,
+        }

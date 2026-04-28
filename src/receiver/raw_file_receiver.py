@@ -15,8 +15,7 @@ class RawFileReceiver(BaseReceiver):
     - 처리 단위는 block
     - 1 block = 16,384 samples
     - 출력 shape은 항상 (num_channels, num_samples)
-    - 단일 채널 파일이면 (1, N)
-    - 2채널 파일이면 (2, N)
+    - 파일 전체를 로드한 뒤 read_block()으로 block 단위 순차 읽기
     """
 
     def __init__(
@@ -27,9 +26,7 @@ class RawFileReceiver(BaseReceiver):
         center_freq: float = 2_400_000_000,
         num_channels: int = 1,
         block_size: int = 16_384,
-        num_samples: int | None = None,
     ) -> None:
-        # file_path / filepath 둘 다 지원
         path = file_path if file_path is not None else filepath
 
         if path is None:
@@ -46,10 +43,6 @@ class RawFileReceiver(BaseReceiver):
         )
 
         self.samples = self._load_iq_file(self.file_path)
-
-        if num_samples is not None:
-            self.samples = self.samples[:, : int(num_samples)]
-
         self.samples = self.validate_samples(self.samples)
 
     def read_samples(self, num_samples: int) -> np.ndarray:
@@ -91,6 +84,29 @@ class RawFileReceiver(BaseReceiver):
         파일 읽기 위치를 처음으로 되돌린다.
         """
         self.cursor = 0
+
+    def num_available_samples(self) -> int:
+        """
+        현재 파일에 남아 있는 sample 수를 반환한다.
+        """
+        return int(self.samples.shape[1] - self.cursor)
+
+    def num_total_samples(self) -> int:
+        """
+        파일 전체 sample 수를 반환한다.
+        """
+        return int(self.samples.shape[1])
+
+    def num_blocks(self, drop_last: bool = True) -> int:
+        """
+        현재 파일에서 읽을 수 있는 block 개수를 반환한다.
+        """
+        total = self.samples.shape[1]
+
+        if drop_last:
+            return int(total // self.block_size)
+
+        return int(np.ceil(total / self.block_size))
 
     def _load_iq_file(self, file_path: Path) -> np.ndarray:
         """
@@ -136,15 +152,12 @@ class RawFileReceiver(BaseReceiver):
         IQ 배열을 (num_channels, num_samples) 형태로 통일한다.
         """
         if raw.ndim == 1:
-            # (N,) -> (1, N)
             raw = raw[np.newaxis, :]
 
         elif raw.ndim == 2:
-            # 이미 (C, N) 형태인 경우
             if raw.shape[0] == self.num_channels:
                 pass
 
-            # (N, C) 형태인 경우 transpose
             elif raw.shape[1] == self.num_channels:
                 raw = raw.T
 

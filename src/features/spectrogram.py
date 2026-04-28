@@ -99,6 +99,8 @@ def compute_stft_branch(
 
     1. AoA / coherence용 complex STFT branch
     2. CNN용 log-magnitude spectrogram branch
+    AoA 계산용 phase_diff는 최종적으로 IQ block에서 직접 계산한다.
+    spectrogram.py의 complex_stft/phase는 Stage1 검증과 시각화/저장용에 가깝다.
 
     입력:
         iq_block.shape = (16384,)
@@ -107,6 +109,7 @@ def compute_stft_branch(
         complex_stft.shape = (512, 125)
         phase.shape = (512, 125)
         cnn_spectrogram.shape = (512, 125)
+        
     """
 
     iq_block = _validate_iq_block(iq_block)

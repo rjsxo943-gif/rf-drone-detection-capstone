@@ -22,8 +22,6 @@ def compute_stft_coherence(
     """
     RX0/RX1 complex STFT로부터 coherence 값을 계산한다.
 
-    Parameters
-    ----------
     z0, z1:
         complex STFT matrices.
         shape = (freq_bins, time_frames)
@@ -31,19 +29,13 @@ def compute_stft_coherence(
     energy_percentile:
         에너지가 높은 bin만 coherence 계산에 사용하기 위한 percentile.
         기본 75는 상위 25% 에너지 영역만 사용한다는 뜻이다.
-
-    Returns
-    -------
-    coherence:
-        0~1 사이 값.
-        1에 가까울수록 두 채널이 같은 신호를 안정적으로 보고 있다는 뜻.
-
-    used_bins:
-        coherence 계산에 사용된 STFT bin 개수.
     """
 
-    z0 = np.asarray(z0, dtype=np.complex64)
-    z1 = np.asarray(z1, dtype=np.complex64)
+    z0 = np.asarray(z0)
+    z1 = np.asarray(z1)
+
+    if z0.size == 0 or z1.size == 0:
+        raise ValueError("z0 and z1 must not be empty.")
 
     if z0.shape != z1.shape:
         raise ValueError(f"z0 and z1 must have same shape. got {z0.shape}, {z1.shape}")
@@ -51,11 +43,27 @@ def compute_stft_coherence(
     if z0.ndim != 2:
         raise ValueError(f"z0 and z1 must be 2-D STFT matrices. got ndim={z0.ndim}")
 
+    if not np.iscomplexobj(z0) or not np.iscomplexobj(z1):
+        raise TypeError(
+            f"z0 and z1 must be complex STFT matrices. "
+            f"got z0={z0.dtype}, z1={z1.dtype}"
+        )
+
+    if not 0.0 <= energy_percentile <= 100.0:
+        raise ValueError(
+            f"energy_percentile must be between 0 and 100. "
+            f"got {energy_percentile}"
+        )
+
+    z0 = z0.astype(np.complex64, copy=False)
+    z1 = z1.astype(np.complex64, copy=False)
+
     power = 0.5 * (np.abs(z0) ** 2 + np.abs(z1) ** 2)
 
-    threshold = np.percentile(power, energy_percentile)
-    mask = power >= threshold
+    energy_threshold = np.percentile(power, energy_percentile)
+    mask = power >= energy_threshold
 
+    # 너무 적은 bin만 선택되면 coherence가 불안정해지므로 전체 bin 사용
     if np.count_nonzero(mask) < 10:
         mask = np.ones_like(power, dtype=bool)
 
@@ -67,8 +75,8 @@ def compute_stft_coherence(
     p1 = np.mean(np.abs(y) ** 2)
 
     coherence = (np.abs(cross) ** 2) / (p0 * p1 + eps)
-
     coherence = float(np.clip(coherence, 0.0, 1.0))
+
     used_bins = int(x.size)
 
     return coherence, used_bins
@@ -83,6 +91,9 @@ def coherence_gate(
     """
     coherence를 계산하고 threshold gate를 통과했는지 반환한다.
     """
+
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold must be between 0 and 1. got {threshold}")
 
     coherence, used_bins = compute_stft_coherence(
         z0=z0,

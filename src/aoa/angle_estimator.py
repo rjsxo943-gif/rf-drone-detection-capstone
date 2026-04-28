@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
 
 @dataclass
-class AoAResult:
+class AngleEstimateResult:
     """
-    block 하나에 대한 AoA 계산 결과.
+    block 하나에 대한 AoA 각도 계산 결과.
     """
 
     angle_deg: float
@@ -26,7 +27,7 @@ def phase_diff_to_angle(
     speed_of_light: float = 300_000_000,
     phase_offset_rad: float = 0.0,
     clip_input: bool = True,
-) -> AoAResult:
+) -> AngleEstimateResult:
     """
     RX0/RX1 위상차를 AoA 각도로 변환한다.
 
@@ -35,6 +36,9 @@ def phase_diff_to_angle(
     - wavelength = 0.125 m
     - antenna_spacing = 0.0625 m = lambda / 2
     - 입력 phase_diff_rad는 RX1 위상 - RX0 위상 기준
+
+    공식:
+        theta = arcsin((phase_diff * wavelength) / (2*pi*d))
 
     Args:
         phase_diff_rad:
@@ -47,12 +51,11 @@ def phase_diff_to_angle(
             전파 속도 [m/s]
         phase_offset_rad:
             RX0/RX1 하드웨어 고정 위상 오차 보정값 [rad]
-            실제 보정 전에는 0.0 사용
         clip_input:
             arcsin 입력값을 -1~1로 제한할지 여부
 
     Returns:
-        AoAResult
+        AngleEstimateResult
     """
     if carrier_freq <= 0:
         raise ValueError(f"carrier_freq must be positive, got {carrier_freq}")
@@ -61,6 +64,9 @@ def phase_diff_to_angle(
         raise ValueError(
             f"antenna_spacing_m must be positive, got {antenna_spacing_m}"
         )
+
+    if speed_of_light <= 0:
+        raise ValueError(f"speed_of_light must be positive, got {speed_of_light}")
 
     wavelength_m = speed_of_light / carrier_freq
 
@@ -77,7 +83,7 @@ def phase_diff_to_angle(
         arcsin_input_used = float(np.clip(arcsin_input, -1.0, 1.0))
     else:
         if not valid:
-            return AoAResult(
+            return AngleEstimateResult(
                 angle_deg=float("nan"),
                 angle_rad=float("nan"),
                 phase_diff_rad=float(corrected_phase),
@@ -91,7 +97,7 @@ def phase_diff_to_angle(
     angle_rad = float(np.arcsin(arcsin_input_used))
     angle_deg = float(np.rad2deg(angle_rad))
 
-    return AoAResult(
+    return AngleEstimateResult(
         angle_deg=angle_deg,
         angle_rad=angle_rad,
         phase_diff_rad=float(corrected_phase),
@@ -102,13 +108,13 @@ def phase_diff_to_angle(
 
 
 def estimate_angle_from_phase_result(
-    phase_result,
+    phase_result: Any,
     carrier_freq: float = 2_400_000_000,
     antenna_spacing_m: float = 0.0625,
     speed_of_light: float = 300_000_000,
     phase_offset_rad: float = 0.0,
     clip_input: bool = True,
-) -> AoAResult:
+) -> AngleEstimateResult:
     """
     PhaseDiffResult 객체를 받아 AoA를 계산한다.
 
@@ -152,6 +158,9 @@ def angle_to_phase_diff(
         raise ValueError(
             f"antenna_spacing_m must be positive, got {antenna_spacing_m}"
         )
+
+    if speed_of_light <= 0:
+        raise ValueError(f"speed_of_light must be positive, got {speed_of_light}")
 
     wavelength_m = speed_of_light / carrier_freq
     angle_rad = np.deg2rad(angle_deg)

@@ -187,3 +187,20 @@ ls outputs/runs/latest
 
 명령:
 code docs/planning/COMMANDS.md
+
+
+1. check_raw_iq_store.py 완
+   ↓
+2. check_stage1_branch.py 완
+   ↓
+3. check_stage1_coherence.py 완
+   ↓
+4. calibrate.py 완
+   ↓
+5. preprocess_dataset.py 
+   ↓
+6. train_model.py
+   ↓
+7. export_model.py
+   ↓
+8. run_pipeline.py

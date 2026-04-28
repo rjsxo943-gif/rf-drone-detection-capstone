@@ -89,3 +89,14 @@ train:
 export:
   tflite_path: models/tflite/model.tflite
   quantize: false
+
+inference:
+  backend: dummy   # dummy 또는 keras
+  dummy_class_name: Background
+  dummy_confidence: 0.0
+
+#inference:
+#  backend: keras
+#  dummy_class_name: Background
+#  dummy_confidence: 0.0
+#나중에 모델 다만들면 이렇게 바꾸기 
