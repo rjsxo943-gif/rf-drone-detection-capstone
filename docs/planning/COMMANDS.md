@@ -27,8 +27,10 @@ source .venv/bin/activate
 sim input -> preprocess -> framing -> FFT -> energy detect -> summary/plot 저장
 
 명령:
-python scripts/run_pipeline.py
+cd ~/projects/rf-drone-detection-capstone
+source .venv/bin/activate
 
+PYTHONPATH=. python scripts/파일이름.py
 --------------------------------------------------
 3) 최신 결과 목록 보기
 최신 실행 결과 파일들이 제대로 생겼는지 확인한다.

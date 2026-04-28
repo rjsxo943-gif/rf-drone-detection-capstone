@@ -5,31 +5,72 @@
 # source_type 사용법:
 # - sim  : synthetic IQ 생성
 # - file : 저장된 IQ 파일(.npy) 읽기
-# - sdr  : 실제 SDR 입력(나중에 구현)
+# - sdr  : 실제 SDR 입력(Pluto+)
 #
-# 주의:
-# - source_type: file 일 때는 file_path를 사용
-# - source_type: sim 일 때는 sim 블록의 값을 사용
-# - center_freq는 지금 sim 파이프라인에서는 직접 안 써도, 나중에 SDR 연결용으로 유지하는 게 좋다
+# 현재 프로젝트 기준:
+# - 처리 단위는 segment가 아니라 block
+# - 1 block = 16,384 IQ samples
+# - sample_rate = 5 MSPS 기준
+# - num_samples는 block_size의 배수로 설정하는 것이 좋다
+#
+# 예:
+# - block_size = 16384
+# - num_samples = 262144 = 16384 × 16
+# - 즉, 한 번 실행하면 16개 block 처리
 
 source_type: sim
 
-sample_rate: 2000000
+sample_rate: 5000000
 center_freq: 2400000000
+
+block_size: 16384
 num_samples: 262144
 
 # source_type: file 일 때 사용할 파일 경로
 file_path: data/raw_iq/test.npy
 
+# synthetic IQ 생성 설정
 sim:
   tone_freq_norm: 0.08
   noise_std: 0.08
   burst_amplitude: 1.5
+
+  # block_size 16384 기준에서 4096이면 block 하나에 burst 주기가 4번 들어감
   burst_period: 4096
   burst_length: 768
+
   seed: 42
 
-# 나중에 실제 SDR 붙일 때 확장
+# source_type: sdr 일 때 사용할 Pluto+ 설정
 sdr:
-  device: hackrf
+  device: pluto_plus
+
+  # Pluto+ USB Ethernet 기본 주소
+  uri: ip:192.168.2.1
+
+  # Pluto+ RX0/RX1 두 채널 사용
+  channels: [0, 1]
+
+  # 수신 중심 주파수
+  center_freq: 2400000000
+
+  # 수신 샘플레이트
+  sample_rate: 5000000
+
+  # RF 수신 대역폭
+  # 보통 sample_rate와 같은 값으로 시작
+  rf_bandwidth: 5000000
+
+  # 수동 gain 사용
+  gain_control_mode: manual
   gain: 20
+
+  # 한 번에 읽을 샘플 수
+  # 262144 = 16384 × 16 blocks
+  num_samples: 262144
+
+  # block 단위 처리
+  block_size: 16384
+
+  # 초기 버퍼 안정화를 위해 읽고 버릴 횟수
+  warmup_reads: 1

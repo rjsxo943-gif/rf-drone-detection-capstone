@@ -1,4 +1,55 @@
-frame_size: 1024
-hop_size: 512
-window: hann
-threshold_multiplier: 5.0
+# configs/detect.yaml
+#
+# 에너지 기반 1차 탐지 설정 파일
+#
+# 현재 프로젝트 기준:
+# - 전체 처리 단위는 segment가 아니라 block
+# - 1 block = 16,384 IQ samples
+# - Energy Detector는 block 내부를 더 작은 energy frame으로 나눠서 에너지를 계산한다.
+#
+# 역할:
+# - block 안에 의미 있는 RF 신호가 있는지 1차로 확인한다.
+# - 신호가 없으면 CNN/STFT와 AoA 계산을 생략할 수 있다.
+# - 신호가 있으면 CNN branch로 넘긴다.
+#
+# 용어:
+# - block : 파이프라인 전체 처리 단위, 16,384 samples
+# - frame : Energy Detector 내부 계산 창
+# - hop_size : energy frame을 이동시키는 간격
+#
+# 현재 설정 기준:
+# - block_size = 16,384
+# - frame_size = 1,024
+# - hop_size = 512
+#
+# block 하나당 energy frame 개수:
+# floor((16384 - 1024) / 512) + 1 = 31개
+
+block_size: 16384
+
+energy_detector:
+  # energy 계산 방식
+  # - time_power: 시간영역에서 mean(|x[n]|^2) 계산
+  # - fft_power : FFT 후 mean(|X[k]|^2) 계산
+  # 현재는 단순하고 빠른 time_power를 기본으로 사용
+  method: time_power
+
+  # block 내부 energy frame 크기
+  frame_size: 1024
+
+  # energy frame 이동 간격
+  hop_size: 512
+
+  # energy 계산 전 적용할 window
+  window: hann
+
+  # noise_floor보다 몇 배 이상 클 때 신호가 있다고 볼지 결정
+  # 값이 클수록 보수적이고, 작을수록 민감함
+  threshold_multiplier: 5.0
+
+  # block 내부 frame 중 threshold를 넘은 frame 비율이 이 값 이상이면
+  # 해당 block을 energy_detected=True로 판단
+  #
+  # 현재 frame 개수 31개 기준:
+  # 0.05는 대략 2개 이상의 frame이 탐지되면 block 탐지로 보는 수준
+  min_detection_ratio: 0.05

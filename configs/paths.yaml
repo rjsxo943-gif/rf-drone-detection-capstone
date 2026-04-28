@@ -1,6 +1,23 @@
+# configs/paths.yaml
+#
+# 프로젝트에서 사용하는 주요 폴더 경로를 관리하는 설정 파일이다.
+#
+# 목적:
+# - 코드 안에서 경로를 하드코딩하지 않기
+# - raw IQ, processed data, model, output 경로를 한 곳에서 관리하기
+# - block 단위 실행 결과를 outputs/runs/latest 아래에 저장하기
+
 data:
+  root: data
+
   external: data/external
+  external_cardrf: data/external/cardrf
+  external_drone_detect: data/external/drone_detect
+  external_drone_rf: data/external/drone_rf
+
   raw_iq: data/raw_iq
+  raw_iq_pluto: data/raw_iq/pluto
+
   synthetic: data/synthetic
   interim: data/interim
   processed: data/processed
@@ -8,12 +25,37 @@ data:
   splits: data/splits
 
 models:
+  root: models
+
   checkpoints: models/checkpoints
   reports: models/reports
   tflite: models/tflite
   metadata: models/metadata
+  artifacts: models/metadata/artifacts
 
 outputs:
+  root: outputs
+
   figures: outputs/figures
   predictions: outputs/predictions
+  exports: outputs/exports
   runs: outputs/runs
+
+  # 최신 실행 결과 저장 위치
+  latest_run: outputs/runs/latest
+
+  # Stage 1 중간 산출물 저장 위치
+  stage1: outputs/runs/latest/stage1
+  stage1_spectrograms: outputs/runs/latest/stage1/spectrograms
+  stage1_iq_blocks: outputs/runs/latest/stage1/iq_blocks
+
+docs:
+  root: docs
+
+  planning: docs/planning
+  experiments: docs/experiments
+  hardware: docs/hardware
+  presentation: docs/presentation
+
+logs:
+  root: logs

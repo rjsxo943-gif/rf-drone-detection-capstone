@@ -1,3 +1,78 @@
+# configs/aoa.yaml
+#
+# AoA(Angle of Arrival, 도래각) 계산 설정 파일
+#
+# 현재 프로젝트 기준:
+# - Pluto+ RX0/RX1 두 채널 사용
+# - CNN이 Drone-like confidence threshold를 통과한 경우에만 AoA 계산
+# - RX0/RX1의 같은 block_index에 해당하는 IQ block으로 위상차 계산
+# - 1 block = 16,384 samples
+# - 중심 주파수는 2.4 GHz 기준
+# - 안테나 간격은 λ/2 = 0.0625 m 기준
+
+# 처리 단위
+block_size: 16384
+
+# 중심 주파수
 carrier_freq: 2400000000
+
+# 전파 속도
+speed_of_light: 300000000
+
+# 2.4GHz에서 파장:
+# wavelength = speed_of_light / carrier_freq
+#            = 0.125 m
+wavelength_m: 0.125
+
+# 안테나 간격
+# 2.4GHz 기준 λ/2 = 0.0625 m
 antenna_spacing_m: 0.0625
-phase_smooth_window: 5
+
+# AoA 계산 방식
+method: phase_difference
+
+# 사용할 채널
+# ref_channel = RX0
+# target_channel = RX1
+ref_channel: 0
+target_channel: 1
+
+# RX0/RX1 채널 간 고정 위상 오차 보정값
+# 실제 측정 전에는 0으로 둔다.
+# 나중에 calibrate.py 또는 phaseoffset.py로 기준 신호를 측정해서 업데이트한다.
+phase_offset_rad: 0.0
+
+# 위상차 계산 후 -pi ~ pi 범위로 정리할지 여부
+wrap_phase: true
+
+# arcsin 입력값이 -1~1 범위를 넘지 않도록 clipping
+# 실제 잡음이나 위상 오차 때문에 범위를 살짝 넘을 수 있음
+clip_arcsin_input: true
+
+# AoA 출력 단위
+output_unit: degree
+
+# 각도 제한
+# d = λ/2인 2채널 구조에서는 보통 -90도 ~ +90도 범위로 해석
+angle_min_deg: -90
+angle_max_deg: 90
+
+# CNN 결과와 연결할 AoA 계산 gate
+# Drone-like 확률이 threshold 이상일 때만 AoA branch를 실행한다.
+gate:
+  enabled: true
+  target_class: Drone-like
+  confidence_threshold: 0.85
+
+# RX0/RX1 coherence 확인 설정
+# AoA gate를 통과했더라도 coherence가 너무 낮으면 AoA 결과를 신뢰하기 어렵다.
+coherence:
+  enabled: true
+  threshold: 0.60
+
+# AoA smoothing 설정
+# block 단위 AoA가 너무 흔들릴 수 있으므로 최근 N개 block 결과를 평균/중앙값 처리
+smoothing:
+  enabled: true
+  method: median
+  window_size: 5

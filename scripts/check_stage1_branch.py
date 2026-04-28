@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 
-from src.features.spectrogram import compute_dual_channel_stft_branch
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.features.spectrogram import compute_dual_channel_stft_branch
 
 def make_dual_channel_test_iq(
     sample_rate: float,

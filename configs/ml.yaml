@@ -1,4 +1,91 @@
-input_size: 1024
+# configs/ml.yaml
+#
+# CNN / STFT / 모델 저장 경로 설정 파일
+#
+# 현재 프로젝트 기준:
+# - 전체 처리 단위는 block
+# - 1 block = 16,384 IQ samples
+# - block 하나에서 STFT spectrogram 생성
+# - spectrogram 원본 크기를 CNN 입력으로 사용
+# - resize 64x64는 현재 기본값으로 사용하지 않음
+#
+# 현재 STFT 기준:
+# - nperseg = 512
+# - noverlap = 384
+# - hop_length = 128
+# - block_size = 16384
+# - complex STFT shape = 512 x 125
+#
+# CNN 입력 기준:
+# - RX0 또는 RX1 중 하나를 선택
+# - 기본은 RX0 사용
+# - CNN 입력 shape = 512 x 125 x 1
+
+block_size: 16384
+
 num_classes: 4
-model_path: models/checkpoints/model.keras
-tflite_path: models/tflite/model.tflite
+
+class_names:
+  - Background
+  - WiFi
+  - Bluetooth
+  - Drone-like
+
+# CNN branch에서 사용할 RX 채널 선택
+# Pluto+ 2채널 입력 shape = (2, 16384)
+# rx_index: 0이면 RX0 사용
+# rx_index: 1이면 RX1 사용
+cnn_input:
+  rx_index: 0
+
+stft:
+  nperseg: 512
+  noverlap: 384
+  hop_length: 128
+  window: hann
+
+  # complex IQ STFT 기준
+  # 현재 check_stage1_coherence.py 결과:
+  # complex STFT shape = (512, 125)
+  expected_freq_bins: 512
+  expected_time_frames: 125
+
+  # 복소 IQ 신호이므로 양방향 주파수 bin을 사용
+  # 즉, 257 bins가 아니라 512 bins 사용
+  onesided: false
+
+  # 주파수 0Hz 성분을 가운데로 정렬할지 여부
+  fftshift: true
+
+spectrogram:
+  # 현재 CNN 입력 기준
+  image_height: 512
+  image_width: 125
+  input_channels: 1
+  input_shape: [512, 125, 1]
+
+  # 현재는 원본 STFT 크기 사용
+  resize: false
+
+  # STFT magnitude 또는 power를 log scale로 변환
+  use_log_scale: true
+
+  # spectrogram 정규화
+  normalize: true
+  normalize_method: minmax
+
+model:
+  type: 2d_cnn
+  model_path: models/checkpoints/model.keras
+  best_model_path: models/checkpoints/best_model.keras
+
+train:
+  batch_size: 32
+  epochs: 50
+  learning_rate: 0.001
+  validation_split: 0.2
+  seed: 42
+
+export:
+  tflite_path: models/tflite/model.tflite
+  quantize: false

@@ -1,0 +1,64 @@
+read_block(16384)
+        ↓
+raw_block (2, 16384)
+        ↓
+DC offset 제거
+        ↓
+block_dc (2, 16384)
+        ↓
+Energy Detector
+        ↓
+신호 있음?
+   ┌────┴────┐
+   │         │
+  No        Yes
+   │         ↓
+   │      RX0 선택
+   │         ↓
+   │      STFT spectrogram
+   │         ↓
+   │      CNN 분류
+   │         ↓
+   │      Drone-like ≥ 0.85?
+   │      ┌────┴────┐
+   │      │         │
+   │     No        Yes
+   │      │         ↓
+   │      │      Phase offset 보정
+   │      │         ↓
+   │      │      Coherence 확인
+   │      │         ↓
+   │      │      Phase difference 계산
+   │      │         ↓
+   │      │      Angle estimation
+   │      │         ↓
+   │      │      AoA smoothing
+   │      │         ↓
+   └──────┴────→ 결과 저장
+
+   src/receiver/pluto_receiver.py
+또는 raw_file_receiver.py / sim_receiver.py
+        ↓
+src/preprocess/dc_blocker.py
+        ↓
+src/detect/energy_detector.py
+        ↓
+src/preprocess/channel_filter.py
+        ↓
+src/features/spectrogram.py
+        ↓
+src/ml/inference.py 또는 추후 CNN inference 코드
+        ↓
+src/aoa/aoa_gate.py
+        ↓
+src/preprocess/phaseoffset.py
+        ↓
+src/aoa/coherence.py
+        ↓
+src/aoa/phase_diff.py
+        ↓
+src/aoa/angle_estimator.py
+        ↓
+src/aoa/aoa_smoother.py
+        ↓
+src/fusion/result_fusion.py 또는 pipeline.py
