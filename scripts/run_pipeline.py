@@ -64,15 +64,21 @@ def main() -> None:
     frame_energies = np.mean(fft_mag ** 2, axis=1).astype(np.float32)
 
     detector = EnergyDetector(
-        threshold_multiplier=energy_cfg["threshold_multiplier"]
+        mode=energy_cfg.get("mode", "block_median"),
+        threshold_multiplier=energy_cfg["threshold_multiplier"],
+        frame_size=energy_cfg["frame_size"],
+        hop_size=energy_cfg["hop_size"],
+        window=energy_cfg["window"],
+        method=energy_cfg["method"],
+        min_detection_ratio=energy_cfg["min_detection_ratio"],
+        calibration_num_blocks=energy_cfg.get("calibration_blocks", 20),
+        require_calibration=False,
     )
 
-    noise_floor = float(np.median(frame_energies))
-    threshold = noise_floor * energy_cfg["threshold_multiplier"]
-    detections = frame_energies > threshold
+    frame_energies = detector.compute_frame_energies(iq_for_aoa)
+    detections = detector.detect_frame_energies(frame_energies)
+   
 
-    detector.noise_floor = noise_floor
-    detector.threshold = threshold
 
     # STFT / coherence / phase / AoA
     stft_done = False
@@ -184,3 +190,41 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+"""
+[x] Receiver 입력
+[x] DC offset 제거
+[x] 정규화
+[x] baseline energy detection
+[x] STFT spectrogram 생성
+[x] coherence 계산
+[x] phase difference 계산
+[x] AoA 계산
+[x] 결과 저장
+
+중요!
+지금 = 임시 (테스트용)
+나중 = 고정 threshold (실제 시스템용)
+
+ PYTHONPATH=. python scripts/run_pipeline.py
+=== Pipeline Result ===
+source_type: sim
+num_samples: 16384
+iq_shape: [2, 16384]
+num_frames: 31
+num_detections: 5
+noise_floor: 36.21341323852539
+threshold: 181.06706619262695
+detection_ratio: 0.16129032258064516
+stft_done: True
+cnn_spectrogram_shape: [512, 125]
+coherence: 0.965193510055542
+coherence_passed: True
+phase_diff_rad: 0.7006573677062988
+phase_diff_deg: 40.14471005431675
+angle_deg: 12.886836778502955
+angle_valid: True
+cnn_enabled: False
+
+saved to: /home/rjsxo342/projects/rf-drone-detection-capstone/outputs/runs/latest
+"""

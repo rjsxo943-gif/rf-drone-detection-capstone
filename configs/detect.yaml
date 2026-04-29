@@ -32,6 +32,8 @@ energy_detector:
   # - time_power: 시간영역에서 mean(|x[n]|^2) 계산
   # - fft_power : FFT 후 mean(|X[k]|^2) 계산
   # 현재는 단순하고 빠른 time_power를 기본으로 사용
+  mode: block_median
+  # mode: initial_calibration
   method: time_power
 
   # block 내부 energy frame 크기
@@ -49,7 +51,8 @@ energy_detector:
 
   # block 내부 frame 중 threshold를 넘은 frame 비율이 이 값 이상이면
   # 해당 block을 energy_detected=True로 판단
-  #
+  
+  calibration_blocks: 20
   # 현재 frame 개수 31개 기준:
   # 0.05는 대략 2개 이상의 frame이 탐지되면 block 탐지로 보는 수준
   min_detection_ratio: 0.05

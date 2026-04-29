@@ -41,6 +41,7 @@ class EnergyDetector:
 
     def __init__(
         self,
+        mode: str = "initial_calibration",
         threshold_multiplier: float = 5.0,
         frame_size: int = 1024,
         hop_size: int = 512,
@@ -50,6 +51,8 @@ class EnergyDetector:
         calibration_num_blocks: int = 20,
         require_calibration: bool = True,
     ) -> None:
+        self.mode = mode.lower().strip()
+
         self.threshold_multiplier = float(threshold_multiplier)
         self.frame_size = int(frame_size)
         self.hop_size = int(hop_size)
@@ -57,15 +60,12 @@ class EnergyDetector:
         self.method = method.lower().strip()
         self.min_detection_ratio = float(min_detection_ratio)
 
-        # noise calibration 설정
         self.calibration_num_blocks = int(calibration_num_blocks)
         self.require_calibration = bool(require_calibration)
 
-        # noise floor / threshold
         self.noise_floor: float | None = None
         self.threshold: float | None = None
 
-        # calibrate_block()으로 하나씩 쌓을 때 사용
         self._calibration_energies: list[np.ndarray] = []
 
     @property
@@ -177,6 +177,25 @@ class EnergyDetector:
             self.fit(frame_energies)
 
         return frame_energies > float(self.threshold)
+
+
+    def detect_frame_energies(self, frame_energies: np.ndarray) -> np.ndarray:
+        frame_energies = np.asarray(frame_energies, dtype=np.float32)
+
+        if frame_energies.size == 0:
+            return np.zeros((0,), dtype=bool)
+
+        if self.mode == "block_median":
+            self.fit(frame_energies)
+            return frame_energies > float(self.threshold)
+
+        if self.mode == "initial_calibration":
+            return self.detect(frame_energies)
+
+        raise ValueError(
+            f"Unsupported EnergyDetector mode: {self.mode}. "
+            "Expected 'block_median' or 'initial_calibration'."
+    )
 
     def detect_block(self, iq_block: np.ndarray) -> EnergyDetectionResult:
         """
