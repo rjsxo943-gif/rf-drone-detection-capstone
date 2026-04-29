@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from src.core.config import load_all_configs
 from src.receiver.factory import build_receiver
-from src.preprocess.dc_blocker import remove_dc
+from src.preprocess.dc_blocker import remove_dc_offset
 from src.preprocess.iq_normalizer import normalize_iq
 from src.preprocess.framing import frame_signal
 from src.features.fft import compute_fft_magnitude
@@ -25,22 +25,26 @@ def main() -> None:
     receiver_cfg = cfg["receiver"]
     detect_cfg = cfg["detect"]
     paths_cfg = cfg["paths"]
+    energy_cfg = detect_cfg["energy_detector"]
 
     receiver = build_receiver(receiver_cfg)
 
     iq = receiver.read_samples(receiver_cfg["num_samples"])
-    iq = remove_dc(iq)
+    iq = remove_dc_offset(iq)
     iq = normalize_iq(iq)
+
+    if iq.ndim == 2:
+        iq = iq[0]
 
     frames = frame_signal(
         iq=iq,
-        frame_size=detect_cfg["frame_size"],
-        hop_size=detect_cfg["hop_size"],
+        frame_size=energy_cfg["frame_size"],
+        hop_size=energy_cfg["hop_size"],
     )
 
     fft_mag = compute_fft_magnitude(
         frames=frames,
-        window=detect_cfg["window"],
+        window=energy_cfg["window"],
     )
 
     if len(fft_mag) == 0:
@@ -49,9 +53,14 @@ def main() -> None:
     frame_energies = np.mean(fft_mag ** 2, axis=1).astype(np.float32)
 
     detector = EnergyDetector(
-        threshold_multiplier=detect_cfg["threshold_multiplier"]
-    )
-    detections = detector.detect(frame_energies)
+    threshold_multiplier=energy_cfg["threshold_multiplier"]
+)
+    noise_floor = float(np.median(frame_energies))
+    threshold = noise_floor * energy_cfg["threshold_multiplier"]
+    detections = frame_energies > threshold
+
+    detector.noise_floor = noise_floor
+    detector.threshold = threshold
 
     run_dir = ROOT / paths_cfg["outputs"]["runs"] / "latest"
     run_dir.mkdir(parents=True, exist_ok=True)
