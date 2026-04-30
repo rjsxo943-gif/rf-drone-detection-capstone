@@ -11,3 +11,6 @@ scan:
 
   mode: full_cycle_triggered_analysis
   save_events: true
+
+  save_spectrogram: true
+  save_stft: false

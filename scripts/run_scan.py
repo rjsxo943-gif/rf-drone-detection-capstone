@@ -22,7 +22,6 @@ def main() -> None:
 
     receiver = build_receiver(receiver_cfg)
 
-
     scan_cfg = cfg["scan"]["scan"] if "scan" in cfg["scan"] else cfg["scan"]
 
     start_freq = float(scan_cfg["start_freq"])
@@ -35,6 +34,14 @@ def main() -> None:
     scan_blocks = int(scan_cfg["scan_blocks"])
     min_pass_blocks = int(scan_cfg["min_pass_blocks"])
 
+    save_spectrogram = bool(scan_cfg.get("save_spectrogram", False))
+    save_stft = bool(scan_cfg.get("save_stft", False))
+
+    run_dir = ROOT / paths_cfg["outputs"]["runs"] / "latest"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    precision_dir = run_dir / "scan_precision"
+
     scanner = FrequencyScanner(
         receiver=receiver,
         start_freq=start_freq,
@@ -46,16 +53,15 @@ def main() -> None:
         min_pass_blocks=min_pass_blocks,
     )
 
-
     analyzer = PrecisionAnalyzer(
         receiver=receiver,
         num_samples=num_samples,
         sample_rate=receiver_cfg["sample_rate"],
         antenna_spacing_m=cfg["aoa"]["antenna_spacing_m"],
+        save_dir=str(precision_dir),
+        save_spectrogram=save_spectrogram,
+        save_stft=save_stft,
     )
-
-    run_dir = ROOT / paths_cfg["outputs"]["runs"] / "latest"
-    run_dir.mkdir(parents=True, exist_ok=True)
 
     events = scanner.scan_once()
     event_dicts = []
@@ -78,6 +84,7 @@ def main() -> None:
 
         result = analyzer.analyze(event.center_freq)
         analysis_dict = asdict(result)
+
         event_dict["analysis"] = analysis_dict
         event_dicts.append(event_dict)
 
@@ -85,7 +92,8 @@ def main() -> None:
             f"  stft_done={result.stft_done} | "
             f"coherence={result.coherence} | "
             f"angle={result.angle_deg} deg | "
-            f"valid={result.angle_valid}"
+            f"valid={result.angle_valid} | "
+            f"spectrogram_path={result.spectrogram_path}"
         )
 
     save_path = run_dir / "scan_events.json"
@@ -97,9 +105,9 @@ def main() -> None:
     print(f"step: {step_freq / 1e6:.1f} MHz")
     print(f"num events: {len(event_dicts)}")
     print(f"triggered events: {sum(1 for e in event_dicts if e['triggered'])}")
+    print(f"save_spectrogram: {save_spectrogram}")
+    print(f"save_stft: {save_stft}")
     print(f"saved to: {save_path}")
-
-
 
 
 if __name__ == "__main__":
