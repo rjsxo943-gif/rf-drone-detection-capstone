@@ -197,10 +197,23 @@ code docs/planning/COMMANDS.md
    ↓
 4. calibrate.py 완
    ↓
-5. preprocess_dataset.py 
+5. preprocess_dataset.py 완(데이터셋없음)
    ↓
 6. train_model.py
    ↓
 7. export_model.py
    ↓
 8. run_pipeline.py
+완
+
+1. run_pipeline.py 먼저 정리
+2. SimReceiver / FileReceiver / PlutoReceiver 흐름 연결
+3. DC offset 제거
+4. STFT spectrogram 생성 확인
+5. coherence / phase offset / AoA 계산 확인
+6. 그다음 CNN dataset 전처리
+7. train.py
+8. export.py
+
+지금 = 임시 (테스트용)
+나중 = 고정 threshold (실제 시스템용)

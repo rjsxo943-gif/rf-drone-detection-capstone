@@ -42,6 +42,14 @@ from src.preprocess.phaseoffset import (
     wrap_phase_rad,
 )
 
+from src.preprocess.gain_matcher import (
+    GainMatcher,
+    GainMatchEstimate,
+    estimate_gain_mismatch,
+    apply_gain_correction,
+    estimate_and_apply_gain_correction,
+)
+
 __all__ = [
     # DC offset
     "remove_dc_offset",
@@ -62,6 +70,13 @@ __all__ = [
     # Channel selection
     "select_rx",
     "get_cnn_input_iq",
+
+    # Gain matching
+    "GainMatchEstimate",
+    "GainMatcher",
+    "estimate_gain_mismatch",
+    "apply_gain_correction",
+    "estimate_and_apply_gain_correction",
 
     # Phase offset
     "PhaseOffsetEstimate",

@@ -10,9 +10,14 @@ if str(ROOT) not in sys.path:
 
 from src.core.config import load_all_configs
 from src.receiver.factory import build_receiver
-from src.preprocess.dc_blocker import remove_dc_offset
-from src.preprocess.iq_normalizer import normalize_iq
-from src.preprocess.framing import frame_signal
+from src.preprocess import (
+    remove_dc_offset,
+    estimate_and_apply_gain_correction,
+    estimate_phase_offset,
+    remove_phase_offset,
+    normalize_iq,
+    frame_signal,
+)
 from src.features.fft import compute_fft_magnitude
 from src.features.spectrogram import compute_dual_channel_stft_branch
 from src.detect.energy_detector import EnergyDetector
@@ -34,8 +39,47 @@ def main() -> None:
 
     receiver = build_receiver(receiver_cfg)
 
+    gain_estimate = None
+    phase_estimate = None
+    fixed_gain_correction = 1.0
+    fixed_phase_offset_rad = 0.0
+
+    # 1) Calibration block: 처음 한 block은 보정값 추정용
+    cal_iq = receiver.read_samples(receiver_cfg["num_samples"])
+    cal_iq = remove_dc_offset(cal_iq)
+
+    if cal_iq.ndim == 2 and cal_iq.shape[0] >= 2:
+        cal_iq, gain_estimate = estimate_and_apply_gain_correction(
+            cal_iq,
+            ref_channel=0,
+            target_channel=1,
+        )
+        fixed_gain_correction = gain_estimate.gain_correction
+
+        phase_estimate = estimate_phase_offset(
+            cal_iq,
+            ref_channel=0,
+            target_channel=1,
+        )
+        fixed_phase_offset_rad = phase_estimate.phase_offset_rad
+
+    # 2) Detection block: 실제 분석용 block은 새로 읽음
     iq = receiver.read_samples(receiver_cfg["num_samples"])
     iq = remove_dc_offset(iq)
+
+    if iq.ndim == 2 and iq.shape[0] >= 2:
+        # calibration에서 구한 gain correction 적용
+        iq[:, :] = iq.astype(np.complex64, copy=False)
+        iq[1] = iq[1] * float(fixed_gain_correction)
+
+        # calibration에서 구한 phase offset 적용
+        iq = remove_phase_offset(
+            iq,
+            phase_offset_rad=fixed_phase_offset_rad,
+            ref_channel=0,
+            target_channel=1,
+        )
+
     iq = normalize_iq(iq)
 
     # 2채널 원본은 STFT/AoA용으로 보관
@@ -154,6 +198,9 @@ def main() -> None:
         "source_type": receiver_cfg["source_type"],
         "num_samples": int(iq_for_aoa.shape[-1]),
         "iq_shape": list(iq_for_aoa.shape),
+        "gain_ref_rms": float(gain_estimate.ref_rms) if gain_estimate is not None else None,
+        "gain_target_rms": float(gain_estimate.target_rms) if gain_estimate is not None else None,
+        "gain_correction": float(gain_estimate.gain_correction) if gain_estimate is not None else None,
         "num_frames": int(len(frames)),
         "num_detections": int(np.sum(detections)),
         "noise_floor": float(detector.noise_floor),
@@ -163,6 +210,9 @@ def main() -> None:
         "cnn_spectrogram_shape": cnn_spectrogram_shape,
         "coherence": coherence_value,
         "coherence_passed": coherence_passed,
+        "phase_offset_rad": float(phase_estimate.phase_offset_rad) if phase_estimate is not None else None,
+        "phase_offset_deg": float(phase_estimate.phase_offset_deg) if phase_estimate is not None else None,
+        "phase_offset_coherence_like": float(phase_estimate.coherence_like) if phase_estimate is not None else None,
         "phase_diff_rad": phase_diff_rad,
         "phase_diff_deg": phase_diff_deg,
         "angle_deg": angle_deg,
@@ -211,18 +261,24 @@ if __name__ == "__main__":
 source_type: sim
 num_samples: 16384
 iq_shape: [2, 16384]
+gain_ref_rms: 2.256859540939331
+gain_target_rms: 2.248995065689087
+gain_correction: 1.0034968841725007
 num_frames: 31
-num_detections: 5
-noise_floor: 36.21341323852539
-threshold: 181.06706619262695
-detection_ratio: 0.16129032258064516
+num_detections: 4
+noise_floor: 0.08896889537572861
+threshold: 0.44484447687864304
+detection_ratio: 0.12903225806451613
 stft_done: True
 cnn_spectrogram_shape: [512, 125]
-coherence: 0.965193510055542
+coherence: 0.9658252596855164
 coherence_passed: True
-phase_diff_rad: 0.7006573677062988
-phase_diff_deg: 40.14471005431675
-angle_deg: 12.886836778502955
+phase_offset_rad: 0.7006573677062988
+phase_offset_deg: 40.14471005431675
+phase_offset_coherence_like: 0.9641743302345276
+phase_diff_rad: -0.00031320605194196105
+phase_diff_deg: -0.01794538489422961
+angle_deg: -0.005712193432669181
 angle_valid: True
 cnn_enabled: False
 

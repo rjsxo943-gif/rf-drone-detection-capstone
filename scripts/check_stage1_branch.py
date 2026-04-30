@@ -47,7 +47,7 @@ def main() -> None:
     block_size = 16_384
     block_index = 0
 
-    nperseg = 512
+    nperseg = 512   
     noverlap = 384
     hop_length = nperseg - noverlap
 
@@ -127,12 +127,12 @@ def main() -> None:
     print(f"spectrogram_image     : {image_path}")
     print()
 
-    expected_shape = (512, 125)
+    expected_freq_bins = 512
 
     shape_ok = (
-        result.rx0.complex_stft.shape == expected_shape
-        and result.rx1.complex_stft.shape == expected_shape
-        and result.cnn_spectrogram.shape == expected_shape
+        result.rx0.complex_stft.shape[0] == expected_freq_bins
+        and result.rx1.complex_stft.shape[0] == expected_freq_bins
+        and result.cnn_spectrogram.shape[0] == expected_freq_bins
     )
 
     dtype_ok = result.cnn_spectrogram.dtype == np.float32

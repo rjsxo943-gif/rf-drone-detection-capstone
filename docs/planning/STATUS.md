@@ -507,3 +507,22 @@ src/ml/transforms.py
 - 실시간 dashboard
 - Raspberry Pi 배포
 ```
+
+1. 처음 20 block 수집
+2. 각 block마다:
+   - DC offset 제거
+   - gain ratio 계산
+   - phase offset 계산
+   - energy 계산
+
+3. 20개 결과에서:
+   - noise_floor = median(energy)
+   - gain_correction = median(gain_correction_list)
+   - phase_offset_rad = circular mean 또는 median
+
+4. 이후 실제 detection block부터:
+   - DC offset 제거
+   - 고정 gain correction 적용
+   - 고정 phase offset 적용
+   - normalization
+   - energy detection / STFT / AoA

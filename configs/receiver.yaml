@@ -40,14 +40,14 @@ file_path: data/raw_iq/test.npy
 
 # source_type: sim 일 때 사용할 synthetic IQ 생성 설정
 sim:
-  tone_freq_norm: 0.08
-  noise_std: 0.08
-  burst_amplitude: 1.5
+  tone_freq_norm: 0.0
+  noise_std: 0.3
+  burst_amplitude: 5
 
   # block_size 16384 기준:
   # burst_period 4096이면 block 하나 안에 burst 주기가 4번 들어감
   burst_period: 4096
-  burst_length: 768
+  burst_length: 3000
 
   # RX1에 줄 고정 위상 offset
   # phaseoffset.py / AoA 테스트용
@@ -89,3 +89,16 @@ sdr:
 
   # 초기 버퍼 안정화를 위해 읽고 버릴 횟수
   warmup_reads: 1
+
+energy_detector:
+  mode: block_median
+  # mode: initial_calibration
+
+  method: time_power
+  frame_size: 1024
+  hop_size: 512
+  window: hann
+
+  threshold_multiplier: 5.0
+  calibration_blocks: 20
+  min_detection_ratio: 0.05
