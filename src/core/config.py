@@ -13,13 +13,13 @@ CONFIG_FILES = {
     "aoa": "aoa.yaml",
     "paths": "paths.yaml",
     "ui": "ui.yaml",
+    "scan": "scan.yaml",
 }
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
     """
     YAML 파일 하나를 읽어서 dict로 반환한다.
-
     파일이 비어 있으면 빈 dict를 반환한다.
     """
     path = Path(path)
@@ -45,6 +45,7 @@ def load_all_configs(config_dir: str | Path = "configs") -> dict[str, dict[str, 
         "aoa": {...},
         "paths": {...},
         "ui": {...},
+        "scan": {...},
     }
     """
     config_dir = Path(config_dir)
@@ -65,7 +66,7 @@ def validate_block_size_consistency(configs: dict[str, dict[str, Any]]) -> None:
 
     현재 프로젝트 기준:
     - block_size = 16384
-    - 모든 주요 설정 파일에서 같은 값을 사용해야 한다.
+    - 주요 설정 파일에서 같은 값을 사용하는 것이 안전하다.
     """
     block_sizes: dict[str, int] = {}
 

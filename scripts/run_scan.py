@@ -22,17 +22,18 @@ def main() -> None:
 
     receiver = build_receiver(receiver_cfg)
 
-    # 임시 스캔 설정
-    # 나중에 configs/scan.yaml로 뺄 예정
-    start_freq = 2_400_000_000
-    stop_freq = 2_485_000_000
-    step_freq = 5_000_000
 
-    num_samples = 16_384
-    threshold = 1.0e7
+    scan_cfg = cfg["scan"]["scan"] if "scan" in cfg["scan"] else cfg["scan"]
 
-    scan_blocks = 3
-    min_pass_blocks = 2
+    start_freq = float(scan_cfg["start_freq"])
+    stop_freq = float(scan_cfg["stop_freq"])
+    step_freq = float(scan_cfg["step_freq"])
+
+    num_samples = int(scan_cfg["num_samples"])
+
+    threshold = float(scan_cfg["threshold"])
+    scan_blocks = int(scan_cfg["scan_blocks"])
+    min_pass_blocks = int(scan_cfg["min_pass_blocks"])
 
     scanner = FrequencyScanner(
         receiver=receiver,

@@ -1,0 +1,13 @@
+scan:
+  start_freq: 2400000000
+  stop_freq: 2485000000
+  step_freq: 5000000
+
+  num_samples: 16384
+
+  threshold: 10000000.0
+  scan_blocks: 3
+  min_pass_blocks: 2
+
+  mode: full_cycle_triggered_analysis
+  save_events: true
