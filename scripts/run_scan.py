@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 from src.core.config import load_all_configs
 from src.receiver.factory import build_receiver
 from src.scan import FrequencyScanner, PrecisionAnalyzer
+from src.ml.inference import build_cnn_classifier
 
 
 def main() -> None:
@@ -19,6 +20,7 @@ def main() -> None:
 
     receiver_cfg = cfg["receiver"]
     paths_cfg = cfg["paths"]
+    ml_cfg = cfg["ml"]
 
     receiver = build_receiver(receiver_cfg)
 
@@ -37,6 +39,8 @@ def main() -> None:
     save_spectrogram = bool(scan_cfg.get("save_spectrogram", False))
     save_stft = bool(scan_cfg.get("save_stft", False))
 
+    cnn_enabled = bool(scan_cfg.get("cnn_enabled", False))
+
     run_dir = ROOT / paths_cfg["outputs"]["runs"] / "latest"
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -53,6 +57,10 @@ def main() -> None:
         min_pass_blocks=min_pass_blocks,
     )
 
+    cnn_classifier = None
+    if cnn_enabled:
+        cnn_classifier = build_cnn_classifier(ml_cfg)
+
     analyzer = PrecisionAnalyzer(
         receiver=receiver,
         num_samples=num_samples,
@@ -61,12 +69,14 @@ def main() -> None:
         save_dir=str(precision_dir),
         save_spectrogram=save_spectrogram,
         save_stft=save_stft,
+        cnn_classifier=cnn_classifier,
     )
 
     events = scanner.scan_once()
     event_dicts = []
 
-    print("=== Scan Start (State Machine Mode) ===")
+    print("=== Scan Start (Full-Cycle Triggered Analysis Mode) ===")
+    print(f"cnn_enabled: {cnn_enabled}")
 
     for event in events:
         event_dict = asdict(event)
@@ -90,6 +100,7 @@ def main() -> None:
 
         print(
             f"  stft_done={result.stft_done} | "
+            f"cnn={result.cnn_label}({result.cnn_score}) | "
             f"coherence={result.coherence} | "
             f"angle={result.angle_deg} deg | "
             f"valid={result.angle_valid} | "
@@ -105,6 +116,7 @@ def main() -> None:
     print(f"step: {step_freq / 1e6:.1f} MHz")
     print(f"num events: {len(event_dicts)}")
     print(f"triggered events: {sum(1 for e in event_dicts if e['triggered'])}")
+    print(f"cnn_enabled: {cnn_enabled}")
     print(f"save_spectrogram: {save_spectrogram}")
     print(f"save_stft: {save_stft}")
     print(f"saved to: {save_path}")

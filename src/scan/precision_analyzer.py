@@ -16,15 +16,20 @@ from src.aoa.angle_estimator import phase_diff_to_angle
 class PrecisionAnalysisResult:
     center_freq: float
     stft_done: bool
+
     cnn_enabled: bool
     cnn_label: str | None
     cnn_score: float | None
+    cnn_class_index: int | None
+    cnn_probabilities: list[float] | None
+
     coherence: float | None
     coherence_passed: bool | None
     phase_diff_rad: float | None
     phase_diff_deg: float | None
     angle_deg: float | None
     angle_valid: bool | None
+
     cnn_spectrogram_shape: list[int] | None
     spectrogram_path: str | None
     rx0_stft_path: str | None
@@ -41,12 +46,11 @@ class PrecisionAnalyzer:
     - normalize
     - STFT 생성
     - CNN 입력용 spectrogram 생성
+    - CNN inference
     - 선택적으로 spectrogram/STFT 저장
     - coherence 검사
     - phase_diff 계산
     - AoA 계산
-
-    CNN은 아직 연결하지 않고 자리만 만들어둔다.
     """
 
     def __init__(
@@ -62,6 +66,7 @@ class PrecisionAnalyzer:
         save_dir: str | None = None,
         save_spectrogram: bool = False,
         save_stft: bool = False,
+        cnn_classifier=None,
     ) -> None:
         self.receiver = receiver
         self.num_samples = int(num_samples)
@@ -77,6 +82,8 @@ class PrecisionAnalyzer:
         self.save_spectrogram = bool(save_spectrogram)
         self.save_stft = bool(save_stft)
 
+        self.cnn_classifier = cnn_classifier
+
         if self.save_dir is not None:
             self.save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -89,9 +96,11 @@ class PrecisionAnalyzer:
             return PrecisionAnalysisResult(
                 center_freq=float(center_freq),
                 stft_done=False,
-                cnn_enabled=False,
+                cnn_enabled=self.cnn_classifier is not None,
                 cnn_label=None,
                 cnn_score=None,
+                cnn_class_index=None,
+                cnn_probabilities=None,
                 coherence=None,
                 coherence_passed=None,
                 phase_diff_rad=None,
@@ -115,6 +124,20 @@ class PrecisionAnalyzer:
             cnn_source="rx0",
         )
 
+        # CNN inference
+        cnn_label = None
+        cnn_score = None
+        cnn_class_index = None
+        cnn_probabilities = None
+
+        if self.cnn_classifier is not None:
+            cnn_result = self.cnn_classifier.predict(branch.cnn_spectrogram)
+            cnn_label = cnn_result.class_name
+            cnn_score = float(cnn_result.confidence)
+            cnn_class_index = int(cnn_result.class_index)
+            cnn_probabilities = [float(p) for p in cnn_result.probabilities]
+
+        # Optional artifact save
         spectrogram_path = None
         rx0_stft_path = None
         rx1_stft_path = None
@@ -157,9 +180,11 @@ class PrecisionAnalyzer:
         return PrecisionAnalysisResult(
             center_freq=float(center_freq),
             stft_done=True,
-            cnn_enabled=False,
-            cnn_label=None,
-            cnn_score=None,
+            cnn_enabled=self.cnn_classifier is not None,
+            cnn_label=cnn_label,
+            cnn_score=cnn_score,
+            cnn_class_index=cnn_class_index,
+            cnn_probabilities=cnn_probabilities,
             coherence=float(coherence_result.coherence),
             coherence_passed=bool(coherence_result.passed),
             phase_diff_rad=float(phase_result.phase_diff_rad),

@@ -14,3 +14,6 @@ scan:
 
   save_spectrogram: true
   save_stft: false
+
+  cnn_enabled: true
+  cnn_model_path: null

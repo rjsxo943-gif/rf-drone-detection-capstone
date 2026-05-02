@@ -78,6 +78,8 @@ model:
   type: 2d_cnn
   model_path: models/checkpoints/model.keras
   best_model_path: models/checkpoints/best_model.keras
+  torch_model_path: models/checkpoints/model_torch.pth
+  best_torch_model_path: models/checkpoints/best_model_torch.pth
 
 train:
   batch_size: 32
@@ -91,7 +93,9 @@ export:
   quantize: false
 
 inference:
-  backend: dummy   # dummy 또는 keras
+  backend: torch   # dummy, keras, torch
+  model_path: null
+  device: cpu
   dummy_class_name: Background
   dummy_confidence: 0.0
 
