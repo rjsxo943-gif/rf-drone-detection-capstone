@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.runtime.scan_actions import run_scan_action
 from src.calibration import load_calibration_params
 from src.runtime.calibration_actions import (
     DEFAULT_NOISE_OUTPUT,
@@ -90,12 +91,25 @@ def run_cli() -> None:
         elif cmd == "s":
             print()
             print("=== Scan Start ===")
-            print("아직 runtime CLI에서는 scan을 직접 실행하지 않는다.")
-            print("현재는 아래 명령어로 실행하면 된다:")
+            print("runtime CLI에서 scripts/run_scan.py를 실행한다.")
+            print("주의: 현재 단계에서는 scan 내부에 calibration parameter를 직접 주입하는 구조는 아직 아니다.")
+            print("다음 단계에서 run_scan.py 또는 state_machine.py에 calibration 적용을 연결한다.")
             print()
-            print("PYTHONPATH=. python scripts/run_scan.py")
-            print()
-            print("다음 단계에서 SCAN/BAND_HOLD 상태머신에 연결하면 된다.")
+
+            try:
+                return_code = run_scan_action(
+                    require_noise=True,
+                    require_phase_gain=False,
+                )
+
+                if return_code != 0:
+                    print(f"[WARN] scan finished with non-zero return code: {return_code}")
+
+            except FileNotFoundError as e:
+                print(f"[ERROR] {e}")
+
+            except Exception as e:
+                print(f"[ERROR] scan action failed: {e}")
 
         elif cmd == "q":
             print("exit runtime cli")
