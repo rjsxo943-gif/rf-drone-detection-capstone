@@ -71,9 +71,19 @@ def run_cli() -> None:
 
     while True:
         print_menu()
-        cmd = input("select> ").strip().lower()
 
-        if cmd == "c":
+        try:
+            cmd = input("select> ").strip().lower()
+        except KeyboardInterrupt:
+            print()
+            print("exit runtime cli")
+            break
+
+        if cmd == "q":
+            print("exit runtime cli")
+            break
+
+        elif cmd == "c":
             print_calibration_status()
 
         elif cmd == "n":
@@ -91,15 +101,19 @@ def run_cli() -> None:
         elif cmd == "s":
             print()
             print("=== Scan Start ===")
-            print("runtime CLI에서 scripts/run_scan.py를 실행한다.")
+            print("runtime 내부 continuous scan loop를 실행한다.")
+            print("scan cycle 사이에 q 입력 후 Enter를 누르면 중단하고 CLI로 복귀한다.")
             print("주의: 현재 단계에서는 scan 내부에 calibration parameter를 직접 주입하는 구조는 아직 아니다.")
-            print("다음 단계에서 run_scan.py 또는 state_machine.py에 calibration 적용을 연결한다.")
+            print("다음 단계에서 scan_loop.py 또는 PrecisionAnalyzer에 calibration 적용을 연결한다.")
             print()
 
             try:
                 return_code = run_scan_action(
                     require_noise=True,
                     require_phase_gain=False,
+                    stop_key="q",
+                    cycle_delay_sec=0.0,
+                    verbose=True,
                 )
 
                 if return_code != 0:
@@ -111,9 +125,8 @@ def run_cli() -> None:
             except Exception as e:
                 print(f"[ERROR] scan action failed: {e}")
 
-        elif cmd == "q":
-            print("exit runtime cli")
-            break
+        elif cmd == "":
+            continue
 
         else:
             print(f"unknown command: {cmd}")
