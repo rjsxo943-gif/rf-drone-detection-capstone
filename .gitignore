@@ -90,3 +90,5 @@ configs/aoa.yaml
 # =========================
 *.tmp
 *.temp
+__pycache__/
+*.pyc
