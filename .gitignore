@@ -92,3 +92,4 @@ configs/aoa.yaml
 *.temp
 __pycache__/
 *.pyc
+*.npy
