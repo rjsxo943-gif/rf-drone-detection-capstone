@@ -93,3 +93,5 @@ configs/aoa.yaml
 __pycache__/
 *.pyc
 *.npy
+outputs/
+repo_files.txt
