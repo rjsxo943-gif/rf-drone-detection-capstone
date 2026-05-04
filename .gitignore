@@ -95,3 +95,17 @@ __pycache__/
 *.npy
 outputs/
 repo_files.txt
+
+# Mavic / generated RF dataset files
+data/external/mavic/
+data/raw_iq/mavic/
+data/processed/mavic_auto*/
+data/processed/spectrograms/
+outputs/
+
+# Mavic / generated RF dataset files
+data/external/mavic/
+data/raw_iq/mavic/
+data/processed/mavic_auto*/
+data/processed/spectrograms/
+outputs/
