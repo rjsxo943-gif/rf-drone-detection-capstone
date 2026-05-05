@@ -19,11 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.core.config import load_yaml
 from src.features.spectrogram import compute_stft_branch
 
 
 DEFAULT_MAT_PATH = Path("data/external/mavic/Mavic_0.mat")
 DEFAULT_OUT_DIR = Path("data/processed/mavic_auto")
+DEFAULT_ML_CONFIG_PATH = Path("configs/ml.yaml")
 
 ORIG_FS = 100_000_000
 TARGET_FS = 5_000_000
@@ -32,11 +34,6 @@ BLOCK_SIZE = 16_384
 DECIM = ORIG_FS // TARGET_FS
 WIDE_BLOCK_SIZE = BLOCK_SIZE * DECIM
 
-NPERSEG = 512
-NOVERLAP = 384
-NFFT = 512
-WINDOW = "hann"
-
 
 def safe_offset_name(offset_mhz: float) -> str:
     sign = "p" if offset_mhz >= 0 else "m"
@@ -44,6 +41,72 @@ def safe_offset_name(offset_mhz: float) -> str:
     text = f"{value:.3f}".rstrip("0").rstrip(".")
     text = text.replace(".", "p")
     return f"{sign}{text}"
+
+
+def load_stft_params_from_ml_config(ml_config_path: Path) -> dict:
+    """
+    configs/ml.yaml에서 CNN spectrogram 생성용 STFT 파라미터를 읽는다.
+
+    현재 ml.yaml 기준:
+    stft:
+      nperseg: 128
+      noverlap: 96
+      hop_length: 32
+      nfft: 128
+      window: hann
+    """
+    cfg = load_yaml(ml_config_path)
+
+    if "stft" not in cfg:
+        raise KeyError(f"'stft' section not found in {ml_config_path}")
+
+    stft_cfg = cfg["stft"]
+
+    nperseg = int(stft_cfg["nperseg"])
+    noverlap = int(stft_cfg["noverlap"])
+    hop_length = int(stft_cfg.get("hop_length", nperseg - noverlap))
+    nfft = int(stft_cfg.get("nfft", nperseg))
+    window = str(stft_cfg.get("window", "hann"))
+
+    expected_hop = nperseg - noverlap
+    if hop_length != expected_hop:
+        raise ValueError(
+            "STFT 설정 불일치: hop_length must be nperseg - noverlap. "
+            f"nperseg={nperseg}, noverlap={noverlap}, "
+            f"hop_length={hop_length}, expected_hop={expected_hop}"
+        )
+
+    if nperseg <= 0:
+        raise ValueError(f"nperseg must be positive, got {nperseg}")
+
+    if noverlap < 0:
+        raise ValueError(f"noverlap must be >= 0, got {noverlap}")
+
+    if noverlap >= nperseg:
+        raise ValueError(
+            f"noverlap must be smaller than nperseg. "
+            f"nperseg={nperseg}, noverlap={noverlap}"
+        )
+
+    if hop_length <= 0:
+        raise ValueError(f"hop_length must be positive, got {hop_length}")
+
+    if nfft < nperseg:
+        raise ValueError(
+            f"nfft must be >= nperseg. nfft={nfft}, nperseg={nperseg}"
+        )
+
+    return {
+        "nperseg": nperseg,
+        "noverlap": noverlap,
+        "hop_length": hop_length,
+        "nfft": nfft,
+        "window": window,
+        "expected_freq_bins": stft_cfg.get("expected_freq_bins"),
+        "expected_time_frames": stft_cfg.get("expected_time_frames"),
+        "onesided": stft_cfg.get("onesided"),
+        "fftshift": stft_cfg.get("fftshift"),
+    }
 
 
 def load_complex_iq_from_mat(dset, start_sample: int, num_samples: int) -> np.ndarray:
@@ -240,6 +303,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
 
     parser.add_argument(
+        "--ml-config",
+        type=Path,
+        default=DEFAULT_ML_CONFIG_PATH,
+        help="CNN/STFT 설정 YAML 경로",
+    )
+
+    parser.add_argument(
         "--start-wide-block",
         type=int,
         default=0,
@@ -315,6 +385,17 @@ def main() -> None:
     if not args.mat_path.exists():
         raise FileNotFoundError(f"MAT file not found: {args.mat_path}")
 
+    if not args.ml_config.exists():
+        raise FileNotFoundError(f"ML config file not found: {args.ml_config}")
+
+    stft_params = load_stft_params_from_ml_config(args.ml_config)
+
+    nperseg = stft_params["nperseg"]
+    noverlap = stft_params["noverlap"]
+    hop_length = stft_params["hop_length"]
+    nfft = stft_params["nfft"]
+    stft_window = stft_params["window"]
+
     out_dir = args.out_dir
     spec_npy_dir = out_dir / "spectrogram_npy"
     spec_png_dir = out_dir / "spectrogram_png"
@@ -344,6 +425,7 @@ def main() -> None:
     print("=== Auto Mavic Pipeline ===")
     print(f"mat_path          : {args.mat_path}")
     print(f"out_dir           : {out_dir}")
+    print(f"ml_config         : {args.ml_config}")
     print(f"orig_fs           : {ORIG_FS}")
     print(f"target_fs         : {TARGET_FS}")
     print(f"block_size        : {BLOCK_SIZE}")
@@ -353,6 +435,15 @@ def main() -> None:
     print(f"min_quality_score : {args.min_quality_score}")
     print(f"save_png          : {args.save_png}")
     print(f"save_iq           : {args.save_iq}")
+    print()
+    print("=== STFT Config from ml.yaml ===")
+    print(f"nperseg           : {nperseg}")
+    print(f"noverlap          : {noverlap}")
+    print(f"hop_length        : {hop_length}")
+    print(f"nfft              : {nfft}")
+    print(f"window            : {stft_window}")
+    print(f"expected_freq_bins: {stft_params.get('expected_freq_bins')}")
+    print(f"expected_time_frms: {stft_params.get('expected_time_frames')}")
     print()
 
     with h5py.File(args.mat_path, "r") as f:
@@ -454,10 +545,10 @@ def main() -> None:
                 branch = compute_stft_branch(
                     iq_block=narrow_iq,
                     sample_rate=TARGET_FS,
-                    nperseg=NPERSEG,
-                    noverlap=NOVERLAP,
-                    nfft=NFFT,
-                    window=WINDOW,
+                    nperseg=nperseg,
+                    noverlap=noverlap,
+                    nfft=nfft,
+                    window=stft_window,
                 )
 
                 spec = branch.cnn_spectrogram.astype(np.float32)
@@ -513,6 +604,7 @@ def main() -> None:
                 record = {
                     "label": args.label,
                     "source_mat_path": str(args.mat_path),
+                    "ml_config_path": str(args.ml_config),
                     "wide_block_index": wide_block_idx,
                     "wide_start_sample": wide_start,
                     "wide_end_sample": wide_end,
@@ -526,10 +618,13 @@ def main() -> None:
                     "band_power": float(band_powers[band_idx]),
                     "median_power": median_power,
                     "power_ratio": float(ratios[band_idx]),
-                    "nperseg": NPERSEG,
-                    "noverlap": NOVERLAP,
-                    "nfft": NFFT,
-                    "window": WINDOW,
+                    "nperseg": nperseg,
+                    "noverlap": noverlap,
+                    "hop_length": hop_length,
+                    "nfft": nfft,
+                    "window": stft_window,
+                    "expected_freq_bins": stft_params.get("expected_freq_bins"),
+                    "expected_time_frames": stft_params.get("expected_time_frames"),
                     "spectrogram_shape": list(spec.shape),
                     "spectrogram_npy": str(spec_npy_path),
                     "spectrogram_png": png_path,
@@ -579,6 +674,12 @@ def main() -> None:
             "freq_occupancy_ratio",
             "spec_mean",
             "spec_std",
+            "nperseg",
+            "noverlap",
+            "hop_length",
+            "nfft",
+            "window",
+            "spectrogram_shape",
             "spectrogram_npy",
             "spectrogram_png",
         ]
@@ -637,10 +738,18 @@ def main() -> None:
     summary = {
         "mat_path": str(args.mat_path),
         "out_dir": str(out_dir),
+        "ml_config": str(args.ml_config),
         "orig_fs": ORIG_FS,
         "target_fs": TARGET_FS,
         "block_size": BLOCK_SIZE,
         "wide_block_size": WIDE_BLOCK_SIZE,
+        "nperseg": nperseg,
+        "noverlap": noverlap,
+        "hop_length": hop_length,
+        "nfft": nfft,
+        "window": stft_window,
+        "expected_freq_bins": stft_params.get("expected_freq_bins"),
+        "expected_time_frames": stft_params.get("expected_time_frames"),
         "top_k": args.top_k,
         "power_ratio": args.power_ratio,
         "min_quality_score": args.min_quality_score,

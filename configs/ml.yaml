@@ -39,16 +39,17 @@ cnn_input:
   rx_index: 0
 
 stft:
-  nperseg: 512
-  noverlap: 384
-  hop_length: 128
+  nperseg: 128  # 128 or 512
+  noverlap: 96 # 96 or 384
+  hop_length: 32 # nperseg - noverlap
+  nfft: 128 # nperseg와 같게 설정하는 것을 권장, 128 또는 512
   window: hann
 
   # complex IQ STFT 기준
   # 현재 check_stage1_coherence.py 결과:
   # complex STFT shape = (512, 125)
-  expected_freq_bins: 512
-  expected_time_frames: 125
+  expected_freq_bins: 128  # 128 or 512
+  expected_time_frames: 509   # 509 or 125
 
   # 복소 IQ 신호이므로 양방향 주파수 bin을 사용
   # 즉, 257 bins가 아니라 512 bins 사용
@@ -59,10 +60,10 @@ stft:
 
 spectrogram:
   # 현재 CNN 입력 기준
-  image_height: 512
-  image_width: 125
+  image_height: 128   # 128 or 512
+  image_width: 509    # 509 or 125
   input_channels: 1
-  input_shape: [512, 125, 1]
+  input_shape: [128, 509, 1]  # [128, 509, 1] or [512, 125, 1]
 
   # 현재는 원본 STFT 크기 사용
   resize: false
