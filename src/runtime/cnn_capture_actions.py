@@ -476,12 +476,14 @@ def run_cnn_capture_action(
 
     saved_count = 0
     cycle_index = 0
+    stop_requested = False
 
     try:
-        while saved_count < capture_cfg.max_saved:
+        while saved_count < capture_cfg.max_saved and not stop_requested:
             if _stop_requested(capture_cfg.stop_key):
                 if verbose:
                     print("[STOP] user requested stop")
+                stop_requested = True
                 break
 
             cycle_index += 1
@@ -490,7 +492,13 @@ def run_cnn_capture_action(
                 print(f"--- scan cycle {cycle_index} ---")
 
             for center_freq in scan_freqs:
-                if saved_count >= capture_cfg.max_saved:
+                if saved_count >= capture_cfg.max_saved or stop_requested:
+                    break
+
+                if _stop_requested(capture_cfg.stop_key):
+                    if verbose:
+                        print("[STOP] user requested stop")
+                    stop_requested = True
                     break
 
                 _set_receiver_center_freq(receiver, center_freq)
@@ -503,6 +511,12 @@ def run_cnn_capture_action(
                 last_detection_ratio = 0.0
 
                 for scan_block_idx in range(scan_blocks):
+                    if _stop_requested(capture_cfg.stop_key):
+                        if verbose:
+                            print("[STOP] user requested stop")
+                        stop_requested = True
+                        break
+
                     iq_raw = _read_block(receiver, block_size)
 
                     # 중요:
@@ -537,6 +551,8 @@ def run_cnn_capture_action(
                             f"score={scan_score_db:.2f} dB "
                             f"pass={pass_count}/{min_pass_blocks}"
                         )
+                if stop_requested:
+                    break
 
                 if pass_count < min_pass_blocks:
                     continue
@@ -548,7 +564,13 @@ def run_cnn_capture_action(
                     )
 
                 for precision_idx in range(precision_blocks_per_candidate):
-                    if saved_count >= capture_cfg.max_saved:
+                    if saved_count >= capture_cfg.max_saved or stop_requested:
+                        break
+
+                    if _stop_requested(capture_cfg.stop_key):
+                        if verbose:
+                            print("[STOP] user requested stop")
+                        stop_requested = True
                         break
 
                     iq_raw = _read_block(receiver, block_size)
@@ -630,6 +652,9 @@ def run_cnn_capture_action(
                             f"[saved] {saved_count}/{capture_cfg.max_saved} "
                             f"{sample_path}"
                         )
+
+            if stop_requested:
+                break
 
             if cycle_delay_sec > 0:
                 time.sleep(cycle_delay_sec)
