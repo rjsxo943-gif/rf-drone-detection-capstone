@@ -1,7 +1,9 @@
+#cli.py
 from __future__ import annotations
 
 from pathlib import Path
 
+from src.runtime.cnn_capture_actions import run_cnn_capture_action
 from src.runtime.scan_actions import run_scan_action
 from src.calibration import load_calibration_params
 from src.runtime.calibration_actions import (
@@ -59,10 +61,9 @@ def print_calibration_status() -> None:
 def print_menu() -> None:
     print()
     print("=== RF Drone Detection Runtime CLI ===")
-    print("[c] calibration status")
     print("[n] noise calibration")
     print("[p] phase/gain calibration")
-    print("[s] scan start")
+    print("[s] start")
     print("[q] quit")
 
 
@@ -100,15 +101,36 @@ def run_cli() -> None:
 
         elif cmd == "s":
             print()
-            print("=== Scan Start ===")
-            print("runtime 내부 continuous scan loop를 실행한다.")
-            print("scan cycle 사이에 q 입력 후 Enter를 누르면 중단하고 CLI로 복귀한다.")
-            print("주의: 현재 단계에서는 scan 내부에 calibration parameter를 직접 주입하는 구조는 아직 아니다.")
-            print("다음 단계에서 scan_loop.py 또는 PrecisionAnalyzer에 calibration 적용을 연결한다.")
+            print("=== Start CNN Dataset Capture ===")
+            print("신호원을 켜둔 상태에서 label을 직접 입력하면,")
+            print("스캔으로 잡힌 후보 신호를 CNN 학습용 spectrogram으로 저장한다.")
+            print()
+
+            label = input("label ex) wifi / bluetooth / drone_like / background > ").strip()
+
+            max_saved_text = input("max_saved [default=50] > ").strip()
+            max_saved = int(max_saved_text) if max_saved_text else 50
+
+            rx_index_text = input("rx_index [default=0] > ").strip()
+            rx_index = int(rx_index_text) if rx_index_text else 0
+
+            save_raw_text = input("save raw iq? [y/N] > ").strip().lower()
+            save_raw_iq = save_raw_text in ("y", "yes")
+
+            print()
+            print("=== Capture Config ===")
+            print(f"label       : {label}")
+            print(f"max_saved   : {max_saved}")
+            print(f"rx_index    : {rx_index}")
+            print(f"save_raw_iq : {save_raw_iq}")
             print()
 
             try:
-                return_code = run_scan_action(
+                return_code = run_cnn_capture_action(
+                    label=label,
+                    max_saved=max_saved,
+                    rx_index=rx_index,
+                    save_raw_iq=save_raw_iq,
                     require_noise=True,
                     require_phase_gain=False,
                     stop_key="q",
@@ -117,13 +139,14 @@ def run_cli() -> None:
                 )
 
                 if return_code != 0:
-                    print(f"[WARN] scan finished with non-zero return code: {return_code}")
+                    print(f"[WARN] capture finished with non-zero return code: {return_code}")
 
             except FileNotFoundError as e:
                 print(f"[ERROR] {e}")
+                print("먼저 [n] noise calibration을 실행해야 한다.")
 
             except Exception as e:
-                print(f"[ERROR] scan action failed: {e}")
+                print(f"[ERROR] cnn capture action failed: {e}")
 
         elif cmd == "":
             continue
