@@ -65,7 +65,7 @@ iio_info -s
 직접 IP로 확인한다.
 
 ```bash
-iio_info -u ip:192.168.2.1
+sudo iio_info -u usb:
 ```
 
 ### 2.2 주의
@@ -736,20 +736,26 @@ PYTHONPATH=. python scripts/check_cnn_capture_sample.py --save-png
 
 이 과정이 성공하면, Pluto+ 기반 CNN 학습 데이터 수집 파이프라인은 1차로 정상 동작한다고 보면 된다.
 
+cd ~/projects/rf-drone-detection-capstone
+source .venv/bin/activate
+
+ping -c 3 192.168.2.1
+iio_info -u ip:192.168.2.1
+
 
 데이터 수집
 PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
-  --label home wifihot_ch6_on_2437_gain20 \
-  --blocks 200 \
+  --label home_wifihot_ch6_on_2437_gain10_1m \
+  --blocks 400 \
   --center-freq 2437000000 \
-  --gain 20 \
+  --gain 10 \
   --channel 0 \
   --vmin -40 \
   --vmax 40
 
 PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
-  --label home_wifi_ch6_off_2437_gain20 \
-  --blocks 200 \
+  --label home_wifi_ch6_off_2437_gain10 \
+  --blocks 30 \
   --center-freq 2437000000 \
   --gain 20 \
   --channel 0 \
@@ -757,8 +763,116 @@ PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
   --vmax 40
 
 PYTHONPATH=. python scripts/analyze_capture_folder.py \
-  --folder data/processed/cnn_capture/wifihot_on_2450_gain20/20260508_xxxxxx
-
+  --folder data/processed/cnn_capture/home_wifihot_ch6_on_2437_gain10_1m/20260509_160250
 
 PYTHONPATH=. python scripts/analyze_capture_folder.py \
-  --folder data/processed/cnn_capture/library_wifi_off_2450_gain20/20260508_xxxxxx
+  --folder data/processed/cnn_capture/home_wifi_ch6_off_2437_gain10/20260509_154302
+
+
+PYTHONPATH=. python scripts/select_meaningful_capture_blocks.py \
+  --folder data/processed/cnn_capture/home_wifihot_ch6_on_2437_gain10_1m/20260509_172543
+
+1. capture_wifi_compare_128.py
+   → IQ/STFT 블록 수집
+
+2. analyze_capture_folder.py
+   → 전체적으로 신호가 제대로 잡혔는지 확인
+
+3. select_meaningful_capture_blocks.py
+   → 의미 있는 블록만 selected_meaningful 폴더로 정리
+
+4. 눈으로 selected_meaningful 확인
+   → 진짜 이상한 블록만 수동 제거
+
+find data/processed/cnn_capture/home_wifihot_ch6_on_2437_gain10_1m/WIFI \
+  -type f -name "*Zone.Identifier*" -delete
+
+
+
+BT
+  PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
+  --label home_bt_audio_on_2450_gain10_1m \
+  --blocks 400 \
+  --center-freq 2450000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
+
+  PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
+  --label home_bt_audio_on_2437_gain10_1m \
+  --blocks 400 \
+  --center-freq 2437000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
+
+  PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
+  --label home_bt_audio_on_2460_gain10_1m \
+  --blocks 400 \
+  --center-freq 2460000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
+
+데이터 수집용
+PYTHONPATH=. python scripts/capture_bluetooth_selected_only_128hop32.py \
+  --label home_bt_audio_on_2437_gain10_0.4m \
+  --blocks 4000 \
+  --center-freq 2437000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
+
+
+  PYTHONPATH=. python scripts/analyze_capture_folder.py \
+  --folder data/processed/cnn_capture/home_bt_audio_on_2437_gain10_1m/20260509_185407
+
+
+PYTHONPATH=. python scripts/select_bluetooth_meaningful_blocks.py \
+  --folder data/processed/cnn_capture/home_bt_audio_on_2437_gain10_1m/20260509_185407
+
+PYTHONPATH=. python scripts/select_bluetooth_meaningful_blocks.py \
+--folder data/processed/cnn_capture/home_bt_audio_on_2450_gain10_1m/20260509_184541
+
+PYTHONPATH=. python scripts/select_bluetooth_meaningful_blocks.py \
+--folder data/processed/cnn_capture/home_bt_audio_on_2460_gain10_1m/20260509_185751
+
+
+background
+
+cd ~/projects/rf-drone-detection-capstone
+
+PYTHONPATH=. python scripts/capture_background_selected_only_128hop32.py \
+  --label home_bg_2437_gain10 \
+  --blocks 1000 \
+  --target-selected 500 \
+  --center-freq 2437000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
+
+  PYTHONPATH=. python scripts/capture_background_selected_only_128hop32.py \
+  --label home_bg_2450_gain10 \
+  --blocks 1000 \
+  --target-selected 500 \
+  --center-freq 2450000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
+
+
+  PYTHONPATH=. python scripts/capture_background_selected_only_128hop32.py \
+  --label home_bg_2460_gain10 \
+  --blocks 1000 \
+  --target-selected 500 \
+  --center-freq 2460000000 \
+  --gain 10 \
+  --channel 0 \
+  --vmin -40 \
+  --vmax 40
