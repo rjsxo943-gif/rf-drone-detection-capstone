@@ -49,6 +49,11 @@ from src.ml.transforms import (
     add_batch_dimension,
 )
 
+from src.ml.rf3_inference import (
+    RF3Classifier,
+    RF3Result,
+)
+
 __all__ = [
     "CNNResult",
     "DummyCNNClassifier",
@@ -70,4 +75,6 @@ __all__ = [
     "save_confusion_matrix_png",
     "make_classification_report_text",
     "save_text",
+    "RF3Classifier",
+    "RF3Result",
 ]
