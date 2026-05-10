@@ -40,6 +40,11 @@ def main() -> None:
     aoa_cfg = cfg["aoa"]
 
     energy_cfg = detect_cfg["energy_detector"]
+        # RF3 CNN 학습 데이터 기준 STFT 설정
+    stft_nperseg = 128
+    stft_noverlap = 96
+    stft_nfft = 128
+    stft_window = "hann"
 
     receiver = build_receiver(receiver_cfg)
 
@@ -154,10 +159,10 @@ def main() -> None:
         branch = compute_stft_branch(
             iq_block=single_iq,
             sample_rate=receiver_cfg["sample_rate"],
-            nperseg=512,
-            noverlap=384,
-            nfft=512,
-            window="hann",
+            nperseg=stft_nperseg,
+            noverlap=stft_noverlap,
+            nfft=stft_nfft,
+            window=stft_window,
         )
 
         stft_done = True
@@ -180,10 +185,10 @@ def main() -> None:
             rx0_iq=iq_for_aoa[0],
             rx1_iq=iq_for_aoa[1],
             sample_rate=receiver_cfg["sample_rate"],
-            nperseg=512,
-            noverlap=384,
-            nfft=512,
-            window="hann",
+            nperseg=stft_nperseg,
+            noverlap=stft_noverlap,
+            nfft=stft_nfft,
+            window=stft_window,
             cnn_source="rx0",
         )
 
@@ -225,10 +230,10 @@ def main() -> None:
             rx0_iq=iq_for_aoa[0],
             rx1_iq=iq_for_aoa[1],
             sample_rate=receiver_cfg["sample_rate"],
-            nperseg=512,
-            noverlap=384,
-            nfft=512,
-            window="hann",
+            nperseg=stft_nperseg,
+            noverlap=stft_noverlap,
+            nfft=stft_nfft,
+            window=stft_window,
             cnn_source="rx0",
         )
 
