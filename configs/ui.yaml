@@ -5,71 +5,25 @@
 # 현재 프로젝트 기준:
 # - 처리 단위는 block
 # - 1 block = 16,384 samples
-# - CNN이 Drone-like confidence threshold를 통과한 경우에만 AoA가 계산됨
-# - show_aoa=true여도 AoA gate가 fail이면 화면에는 None 또는 "Not computed"로 표시
+# - 현재 RF3 CNN은 Background / Bluetooth / WiFi 3분류 모델
+# - RF3 CNN 입력 spectrogram shape = [128, 509]
+# - Drone-like 클래스와 AoA gate는 추후 드론 데이터 확보 후 확장 예정
 
-# 대시보드 갱신 주기
-# 단위: ms
 refresh_ms: 100
 
-# 화면 표시 옵션
 display:
   show_spectrogram: true
   show_detector_status: true
   show_cnn_result: true
-  show_aoa: true
+  show_aoa: false # 현재 AoA 계산은 CNN 결과와 연결하는 gate가 없어서 UI에서는 숨김
   show_block_index: true
   show_confidence: true
 
-# Spectrogram 표시 설정
 spectrogram:
   enabled: true
 
-  # 현재 CNN 입력 spectrogram 기준
-  expected_shape: [512, 125]
+  # 현재 RF3 CNN 입력 spectrogram 기준
+  expected_shape: [128, 509]
 
-  # 화면에 표시할 때 log scale 결과를 보여줄지 여부
   show_log_scale: true
-
-  # 최신 block만 보여줄지 여부
   show_latest_only: true
-
-# Energy detector 상태 표시
-detector_status:
-  enabled: true
-  show_detection_ratio: true
-  show_noise_floor: true
-  show_threshold: true
-
-# CNN 결과 표시
-cnn:
-  enabled: true
-  show_class_name: true
-  show_confidence: true
-
-# AoA 표시 설정
-aoa:
-  enabled: true
-
-  # AoA gate를 통과한 경우에만 각도 표시
-  show_only_when_computed: true
-
-  # 표시 단위
-  unit: degree
-
-  # 화면 표시 범위
-  angle_min_deg: -90
-  angle_max_deg: 90
-
-  # AoA가 계산되지 않았을 때 표시할 문구
-  not_computed_text: "AoA not computed"
-
-# 결과 로그 표시
-event_log:
-  enabled: true
-  max_rows: 50
-
-# 그래프 저장 옵션
-save_figures:
-  enabled: true
-  output_dir: outputs/figures
