@@ -18,10 +18,10 @@
 # - num_samples = 16384
 # - 즉, receiver가 한 번 읽으면 block 하나가 나온다.
 
-source_type: sim
+source_type: sdr  # sim, file, sdr 중 하나 선택
 
 sample_rate: 5000000
-center_freq: 2400000000
+center_freq: 2437000000
 
 block_size: 16384
 num_samples: 16384
@@ -29,7 +29,7 @@ num_samples: 16384
 # sim/file 공통 기본 채널 수
 # sim에서 RX0/RX1 2채널을 테스트하려면 2로 둔다.
 # file 모드에서는 저장된 파일의 채널 수와 맞아야 한다.
-num_channels: 2
+num_channels: 1
 #주의할 점은 file 모드야. num_channels: 2로 되어 있으면 
 #file_path의 IQ 파일도 (2, N) 또는 (N, 2) 형태여야 해. 
 #단일 채널 파일이면 num_channels: 1로 바꿔야 한다.
@@ -59,46 +59,22 @@ sim:
 # source_type: sdr 일 때 사용할 Pluto+ 설정
 sdr:
   device: pluto_plus
-
-  # Pluto+ USB Ethernet 기본 주소
   uri: ip:192.168.2.1
 
-  # Pluto+ RX0/RX1 두 채널 사용
-  channels: [0, 1]
+  channels: [0]
 
-  # 수신 중심 주파수
-  center_freq: 2400000000
-
-  # 수신 샘플레이트
+  center_freq: 2437000000
   sample_rate: 5000000
-
-  # RF 수신 대역폭
-  # 보통 sample_rate와 같은 값으로 시작
   rf_bandwidth: 5000000
 
-  # 수동 gain 사용
   gain_control_mode: manual
-  gain: 20
+  gain: 35
 
-  # 현재 실시간 block 처리 기준:
-  # 한 번 읽는 샘플 수 = block 하나
   num_samples: 16384
-
-  # block 단위 처리
   block_size: 16384
 
-  # 초기 버퍼 안정화를 위해 읽고 버릴 횟수
-  warmup_reads: 1
+  # SDR 설정 직후 버릴 버퍼 수
+  warmup_reads: 5
 
-energy_detector:
-  mode: block_median
-  # mode: initial_calibration
-
-  method: time_power
-  frame_size: 1024
-  hop_size: 512
-  window: hann
-
-  threshold_multiplier: 5.0
-  calibration_blocks: 20
-  min_detection_ratio: 0.05
+  # 중심 주파수 변경 직후 버릴 버퍼 수
+  retune_warmup_reads: 3
