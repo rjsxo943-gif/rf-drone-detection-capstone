@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RF Drone Detection Capstone 진행상황</title>
+  <style>
+    :root {
+      --ink: #152036;
+      --muted: #5f6b7c;
+      --line: #dce3ed;
+      --paper: #f7f8fb;
+      --panel: #ffffff;
+      --navy: #17233f;
+      --teal: #0f766e;
+      --cyan: #0b8fb3;
+      --amber: #d97706;
+      --soft-teal: #e8f7f4;
+      --soft-cyan: #e8f6fb;
+      --soft-amber: #fff5df;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.64;
+      letter-spacing: 0;
+    }
+
+    .page {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+
+    .hero {
+      padding: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(11, 143, 179, 0.08)),
+        var(--panel);
+      box-shadow: 0 18px 45px rgba(21, 32, 54, 0.09);
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--navy);
+      font-size: clamp(34px, 5vw, 56px);
+      line-height: 1.08;
+      word-break: keep-all;
+    }
+
+    .lead {
+      max-width: 850px;
+      margin: 20px 0 0;
+      color: #3e4a5c;
+      font-size: 18px;
+      word-break: keep-all;
+    }
+
+    section {
+      margin-top: 36px;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      color: var(--navy);
+      font-size: 28px;
+      line-height: 1.2;
+      word-break: keep-all;
+    }
+
+    h3 {
+      margin: 26px 0 10px;
+      color: var(--navy);
+      font-size: 20px;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      word-break: keep-all;
+    }
+
+    strong {
+      color: var(--navy);
+    }
+
+    code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: #eef2f7;
+      color: #123252;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 16px 0 0;
+      padding: 18px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: #101827;
+      color: #dce7f7;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f3f6fa;
+      color: var(--navy);
+    }
+
+    td {
+      color: #405068;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .card {
+      min-height: 150px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .card b {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--navy);
+      font-size: 17px;
+    }
+
+    .note {
+      margin-top: 18px;
+      padding: 18px;
+      border-left: 4px solid var(--amber);
+      background: var(--soft-amber);
+      color: #6f4300;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .diagram {
+      margin-top: 18px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fbfcfe, #f3f7fb);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+    }
+
+    .flow.long {
+      grid-template-columns: repeat(6, minmax(126px, 1fr));
+    }
+
+    .box {
+      min-height: 92px;
+      padding: 14px;
+      border: 1px solid #c7d3e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--navy);
+      font-weight: 800;
+      position: relative;
+    }
+
+    .box span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .box:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      right: -11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--teal);
+      font-weight: 900;
+      z-index: 2;
+    }
+
+    .expansion-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .pill {
+      padding: 14px;
+      border-radius: 8px;
+      background: var(--soft-cyan);
+      color: #07536a;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .quote {
+      padding: 24px;
+      border-radius: 8px;
+      background: var(--navy);
+      color: #ffffff;
+      font-size: 18px;
+      word-break: keep-all;
+    }
+
+    .quote p {
+      color: #dce7f7;
+      margin: 0;
+    }
+
+    @media (max-width: 860px) {
+      .hero,
+      section {
+        padding: 24px;
+      }
+
+      .grid,
+      .expansion-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow,
+      .flow.long {
+        grid-template-columns: 1fr;
+      }
+
+      .box:not(:last-child)::after {
+        content: "v";
+        right: 16px;
+        top: auto;
+        bottom: -18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Project Progress Dashboard</p>
+      <h1>RF Drone Detection Capstone 진행상황</h1>
+      <p class="lead">2.4GHz RF 신호를 Pluto+ SDR로 수집하고, STFT spectrogram 기반 CNN 분류 파이프라인을 구축하는 캡스톤 프로젝트입니다. 현재 구현은 예산과 장비 제약을 반영한 축소형 RF 드론 탐지 프로토타입입니다.</p>
+    </header>
+
+    <section>
+      <h2>1. 현재 한 줄 요약</h2>
+      <p>완성형 대드론 장비를 만드는 것이 아니라, 저비용 SDR과 Python 기반 신호처리 파이프라인으로 <strong>RF 탐지 계층</strong>을 검증하는 데 초점을 둡니다.</p>
+      <p>중요한 점은 현재 구조가 단순 실험 코드가 아니라, 예산이 확보되면 안테나 수, 관측 대역폭, 수신 채널, 분류 클래스, 방향 추정 범위를 확장할 수 있는 형태로 분리되어 있다는 것입니다.</p>
+    </section>
+
+    <section>
+      <h2>2. 현재 브랜치 상태</h2>
+      <table>
+        <tbody>
+          <tr><th>작업 브랜치</th><td><code>experiment/stft-128-hop32</code></td></tr>
+          <tr><th>최신 원격 커밋</th><td><code>994886f Add project showcase page</code></td></tr>
+          <tr><th>기준 STFT 입력</th><td><code>128 x 509</code></td></tr>
+          <tr><th>주요 모델</th><td>RF3 CNN baseline</td></tr>
+          <tr><th>현재 분류 클래스</th><td>Background / Bluetooth / WiFi</td></tr>
+          <tr><th>소개 페이지</th><td><code>docs/showcase/index.html</code> 추가 완료</td></tr>
+          <tr><th>현재 성격</th><td>예산 제약 기반 축소형 RF 탐지 프로토타입</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>3. 왜 축소형 구현인가</h2>
+      <p>RF 기반 드론 탐지는 수신 장비, 안테나 배열, 동기화된 다중 채널 수신기, 광대역 RF front-end, 실제 드론 RF 데이터 확보 여부에 따라 비용과 난이도가 크게 증가합니다.</p>
+      <pre>저비용 SDR과 소프트웨어 파이프라인만으로
+2.4GHz RF 신호를 수집하고,
+의미 있는 RF block을 선별하고,
+spectrogram으로 변환하고,
+CNN 분류 입력으로 연결할 수 있는가?</pre>
+      <p class="note">현재 구현은 이 질문에 대한 검증 단계입니다. 따라서 지금 시스템은 최종 대드론 시스템이라기보다, 확장 가능한 RF 탐지 시스템의 최소 동작 구조입니다.</p>
+    </section>
+
+    <section>
+      <h2>4. 현재 구현 아키텍처</h2>
+      <div class="diagram">
+        <div class="flow long">
+          <div class="box">제한된 안테나 입력<span>Budget-limited input</span></div>
+          <div class="box">Pluto+ SDR<span>2.45GHz 근처 수집</span></div>
+          <div class="box">IQ Block 수신<span>RF sample stream</span></div>
+          <div class="box">전처리<span>DC / gain / phase / normalization</span></div>
+          <div class="box">Energy Detection<span>active block 선별</span></div>
+          <div class="box">STFT + RF3 CNN<span>128 x 509 분류 입력</span></div>
+        </div>
+      </div>
+      <pre>RF IQ 수신
+  ↓
+전처리
+  ↓
+Energy Detection
+  ↓
+STFT Spectrogram 생성
+  ↓
+CNN 학습/추론 데이터 구성
+  ↓
+결과 저장 및 보고서화</pre>
+      <p>현재는 RF3 baseline 기준으로 Background, Bluetooth, WiFi를 구분하는 모델을 먼저 구축했습니다. 실제 drone-like RF 데이터가 아직 확보되지 않았기 때문에, 현재 모델은 최종 드론 탐지 모델이 아니라 <strong>비드론 RF 신호 분류 baseline</strong>입니다.</p>
+    </section>
+
+    <section>
+      <h2>5. 예산 확보 시 확장 가능한 아키텍처</h2>
+      <p>현재 구현은 입력부와 후단 처리부가 분리되어 있습니다. 따라서 RF 수신부를 확장하면, Energy Detection, STFT, CNN 분류, 결과 저장 흐름은 재사용하거나 확장할 수 있습니다.</p>
+      <div class="diagram">
+        <div class="expansion-grid">
+          <div class="pill">수평 안테나 배열 확장</div>
+          <div class="pill">수직축 안테나 추가</div>
+          <div class="pill">광대역 RF front-end</div>
+          <div class="pill">다중 SDR / 동기화 수신기</div>
+        </div>
+        <div class="flow">
+          <div class="box">Multi-channel RF Capture<span>동시 수신</span></div>
+          <div class="box">Wideband Scan<span>넓은 대역 후보 탐색</span></div>
+          <div class="box">Signal Candidate Detection<span>의심 신호 선별</span></div>
+          <div class="box">CNN / ML Classification<span>드론 의심 신호 분류</span></div>
+          <div class="box">Azimuth + Elevation<span>방위각 + 고각 추정</span></div>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>구분</th><th>현재 구현</th><th>예산 확보 시 확장</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>안테나 구성</td><td>제한된 안테나/채널 기반</td><td>수평 다중 안테나 배열</td></tr>
+          <tr><td>탐지 방향</td><td>제한된 방향 범위 중심</td><td>360도 전방위 감지</td></tr>
+          <tr><td>고각 판단</td><td>현재 구현 범위 밖</td><td>수직축 안테나 추가로 elevation angle 추정</td></tr>
+          <tr><td>중심 주파수</td><td>2.45GHz 근처</td><td>2.4GHz ISM 대역 전체 및 추가 대역 확장</td></tr>
+          <tr><td>관측 대역폭</td><td>현재 안테나 기준 약 23MHz</td><td>더 넓은 bandwidth RF front-end로 확장</td></tr>
+          <tr><td>수신 구조</td><td>단일 또는 제한된 수신 채널</td><td>다중 SDR / 동기화 수신기</td></tr>
+          <tr><td>분류 모델</td><td>Background / Bluetooth / WiFi baseline</td><td>Drone-like / controller / telemetry 등 클래스 확장</td></tr>
+          <tr><td>시스템 목표</td><td>RF 탐지 계층 검증</td><td>실시간 대드론 RF 감시 시스템</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. 확장 가능하지만 현재 미구현인 영역</h2>
+      <div class="grid">
+        <article class="card">
+          <b>전방위 탐지</b>
+          <p>수평 방향으로 안테나 배열을 늘리면 제한된 전방 각도만 보는 구조에서 벗어나 360도 전방위 RF 감시 구조로 확장할 수 있습니다.</p>
+        </article>
+        <article class="card">
+          <b>고각 판단</b>
+          <p>수직축 안테나 또는 높이 차가 있는 안테나 배열을 추가하면 elevation angle 추정과 공중 RF 신호 구분 가능성을 높일 수 있습니다.</p>
+        </article>
+        <article class="card">
+          <b>광대역 감시</b>
+          <p>현재 2.45GHz 근처와 약 23MHz 대역폭 중심에서, 더 넓은 RF front-end로 2.4GHz 전체 및 추가 대역으로 확장할 수 있습니다.</p>
+        </article>
+      </div>
+      <h3>실제 Drone-like 데이터 추가</h3>
+      <pre>Background
+Bluetooth
+WiFi
+Drone-like
+Controller-like
+Telemetry-like</pre>
+      <p>이 단계가 진행되어야 프로젝트가 비드론 RF 신호 분류 baseline에서 실제 드론 탐지 모델로 넘어갈 수 있습니다.</p>
+    </section>
+
+    <section>
+      <h2>7. 완성된 것</h2>
+      <div class="grid">
+        <article class="card">
+          <b>문서</b>
+          <ul>
+            <li>README를 현재 RF 탐지 파이프라인 기준으로 정리</li>
+            <li>RF3 CNN baseline 보고서 추가</li>
+            <li>STFT 128 x 509 기준 문서화</li>
+            <li>프로젝트 showcase 페이지 추가</li>
+          </ul>
+        </article>
+        <article class="card">
+          <b>데이터/모델</b>
+          <ul>
+            <li>Background / Bluetooth / WiFi 3분류 baseline 구성</li>
+            <li>Balanced dataset 1,500개 기준 실험 완료</li>
+            <li>대표 모델 test accuracy 98.67% 기록</li>
+          </ul>
+        </article>
+        <article class="card">
+          <b>파이프라인</b>
+          <ul>
+            <li>IQ block 수신 구조 정리</li>
+            <li>Energy Detector 기반 active block 선별</li>
+            <li>STFT spectrogram 생성</li>
+            <li>향후 AoA branch 연결 구조 정리</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>8. 아직 진행 중인 것</h2>
+      <table>
+        <thead>
+          <tr><th>영역</th><th>현재 상태</th><th>다음 액션</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Drone-like 데이터</td><td>실제 드론 RF 데이터 미확보</td><td>수집 계획/라벨링 기준 필요</td></tr>
+          <tr><td>Runtime inference</td><td>구조는 있음</td><td>RF3 checkpoint 연결 검증</td></tr>
+          <tr><td>AoA</td><td>설계 branch 있음</td><td>RX0/RX1 2채널 실측 검증 필요</td></tr>
+          <tr><td>설정 파일</td><td>일부 로컬 변경 있음</td><td>커밋 여부 판단 필요</td></tr>
+          <tr><td>분류 실행 helper</td><td><code>scripts/run_classify_once.py</code> 미커밋</td><td>테스트 후 커밋 여부 결정</td></tr>
+          <tr><td>확장 아키텍처</td><td>문서화 단계</td><td>발표용 이미지/다이어그램으로 정리 가능</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>9. 최근 작업 흐름</h2>
+      <pre>main
+  ↓
+RF3 CNN baseline 문서/코드 추가
+  ↓
+STFT 입력 기준 128 x 509로 정렬
+  ↓
+Runtime CNN capture 구조 정리
+  ↓
+프로젝트 showcase 페이지 추가
+  ↓
+축소형 구현과 확장 가능 아키텍처 문서화</pre>
+    </section>
+
+    <section>
+      <h2>10. 현재 남은 로컬 변경</h2>
+      <pre>M configs/ml.yaml
+M configs/receiver.yaml
+M docs/planning/COMMANDS.md
+M docs/planning/STATUS.md
+M docs/planning/commands.md
+M docs/planning/mustdothing.md
+M scripts/check_cnn_capture_sample.py
+?? scripts/run_classify_once.py
+?? docs/planning/PROJECT_PROGRESS.md</pre>
+      <p><code>docs/showcase</code>는 이미 커밋되어 원격 브랜치에 올라간 상태입니다. 위 변경들은 별도 작업물로 보고, 필요한 경우 다음 커밋으로 묶는 것이 좋습니다.</p>
+    </section>
+
+    <section>
+      <h2>11. 다음 추천 작업</h2>
+      <div class="grid">
+        <article class="card"><b>1순위</b><p><code>scripts/run_classify_once.py</code> 단일 파일 분류 흐름 확인</p></article>
+        <article class="card"><b>2순위</b><p><code>configs/ml.yaml</code>, <code>configs/receiver.yaml</code> 변경 의도 정리</p></article>
+        <article class="card"><b>3순위</b><p>Drone-like 데이터 수집 계획 작성</p></article>
+      </div>
+    </section>
+
+    <section>
+      <h2>12. 발표/보고서용 핵심 문장</h2>
+      <div class="quote">
+        <p>현재 구현은 예산 제약을 반영한 축소형 RF 탐지 프로토타입입니다. 하지만 시스템을 RF 수신부, 전처리, Energy Detection, STFT feature extraction, CNN classification, 방향 추정 branch로 분리했기 때문에, 예산이 확보되면 안테나 배열과 수신 대역폭을 확장하여 전방위 탐지, 고각 판단, 광대역 RF 감시 구조로 확장할 수 있습니다.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
