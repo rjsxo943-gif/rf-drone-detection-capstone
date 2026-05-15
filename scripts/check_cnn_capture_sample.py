@@ -229,3 +229,18 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+"""최신 sample 자동 검사
+PYTHONPATH=. python scripts/check_cnn_capture_sample.py
+
+특정 파일 검사
+PYTHONPATH=. python scripts/check_cnn_capture_sample.py data/processed/cnn_capture/test_sim/세션폴더/sample_000001.npz
+
+특정 세션 폴더의 최신 sample 검사
+PYTHONPATH=. python scripts/check_cnn_capture_sample.py data/processed/cnn_capture/test_sim/세션폴더
+
+PNG까지 저장
+PYTHONPATH=. python scripts/check_cnn_capture_sample.py --save-png
+
+"""

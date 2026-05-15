@@ -526,3 +526,10 @@ src/ml/transforms.py
    - 고정 phase offset 적용
    - normalization
    - energy detection / STFT / AoA
+
+
+
+1. 실험 기록 md 파일 만들기
+2. 학습 곡선 그래프 만들기
+3. 단일 파일 예측 스크립트 만들기
+4. runtime에서 RF3 모델 호출하는 구조 설계

@@ -95,7 +95,7 @@ export:
 
 inference:
   backend: torch   # dummy, keras, torch
-  model_path: null
+  model_path: outputs/ml/rf3_cnn_baseline_v1/best_model.pt
   device: cpu
   dummy_class_name: Background
   dummy_confidence: 0.0

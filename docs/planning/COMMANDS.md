@@ -217,3 +217,66 @@ code docs/planning/COMMANDS.md
 
 지금 = 임시 (테스트용)
 나중 = 고정 threshold (실제 시스템용)
+
+scan 만들었음. 사이클돌면서 주파수대역 
+신호크기 임계값넘으면 
+
+raw데이터 쪼개서 cnn입력만들기
+PYTHONPATH=. python scripts/auto_mavic_pipeline.py \
+  --max-wide-blocks 0 \
+  --top-k 3 \
+  --power-ratio 1.2 \
+  --save-top-if-none \
+  --out-dir data/processed/mavic_auto_full
+
+git 브런치 분기
+   가장 자주 쓰는 안전한 흐름
+
+너는 그냥 이 패턴만 기억하면 돼.
+
+cd ~/projects/rf-drone-detection-capstone
+
+git switch main
+git pull origin main
+
+git switch -c experiment/stft-128-hop32
+
+# 코드 수정
+# 실행 테스트
+
+git status
+git add .
+git commit -m "experiment: test STFT nperseg 128 hop 32"
+
+망했으면:
+
+git switch main
+git branch -D experiment/stft-128-hop32
+
+A. 변경사항 임시보관
+git stash
+git switch main
+
+나중에 다시 꺼내기:
+
+git stash pop
+B. 변경사항 버리기
+
+정말 필요 없으면:
+
+git reset --hard
+git clean -fd
+git switch main
+
+
+# sdr 연결시 순서 
+
+   1. 노트북에 sdr 연결
+   2. 터미널  iio_info -u ip:192.168.2.1
+   3. 파일위치랑 가상환경on
+      cd ~/projects/rf-drone-detection-capstone
+
+      source .venv/bin/activate
+      
+   4. PYTHONPATH=. python scripts/pluto_start1.py
+   5. PYTHONPATH=. python scripts/pluto+exp.py

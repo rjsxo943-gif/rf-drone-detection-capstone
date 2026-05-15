@@ -18,7 +18,7 @@
 # - num_samples = 16384
 # - 즉, receiver가 한 번 읽으면 block 하나가 나온다.
 
-source_type: sdr  # sim, file, sdr 중 하나 선택
+source_type: sim  # sim, file, sdr 중 하나 선택
 
 sample_rate: 5000000
 center_freq: 2437000000
