@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RF Drone Detection Capstone</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #111827;
+      --muted: #5b6472;
+      --line: #d8dee8;
+      --paper: #f7f8fb;
+      --panel: #ffffff;
+      --navy: #182848;
+      --teal: #0f766e;
+      --amber: #d97706;
+      --red: #be123c;
+      --cyan: #0891b2;
+      --soft-teal: #e7f7f4;
+      --soft-amber: #fff4dc;
+      --soft-cyan: #e8f7fb;
+      --shadow: 0 18px 45px rgba(17, 24, 39, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      line-height: 1.55;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      border-bottom: 1px solid rgba(216, 222, 232, 0.88);
+      background: rgba(247, 248, 251, 0.92);
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar-inner {
+      max-width: 1180px;
+      height: 64px;
+      margin: 0 auto;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      color: var(--navy);
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, 0.95), rgba(8, 145, 178, 0.95)),
+        var(--teal);
+      position: relative;
+      box-shadow: 0 8px 20px rgba(15, 118, 110, 0.22);
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      inset: 8px;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+    }
+
+    .brand-mark::after {
+      inset: 14px;
+      background: #ffffff;
+    }
+
+    .nav {
+      display: flex;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .nav a:hover {
+      color: var(--ink);
+    }
+
+    .hero {
+      min-height: calc(100vh - 64px);
+      display: grid;
+      align-items: center;
+      padding: 46px 22px 32px;
+      background:
+        linear-gradient(180deg, rgba(247, 248, 251, 0.48), var(--paper) 90%),
+        radial-gradient(circle at 12% 20%, rgba(8, 145, 178, 0.12), transparent 28%),
+        radial-gradient(circle at 84% 24%, rgba(217, 119, 6, 0.12), transparent 24%);
+    }
+
+    .hero-grid {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.03fr) minmax(420px, 0.97fr);
+      gap: 38px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .pulse {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 0 7px rgba(15, 118, 110, 0.13);
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--navy);
+      font-size: clamp(38px, 5.1vw, 68px);
+      line-height: 1.06;
+      letter-spacing: 0;
+      word-break: keep-all;
+      overflow-wrap: normal;
+    }
+
+    .lead {
+      max-width: 680px;
+      margin: 24px 0 28px;
+      color: #3e4653;
+      font-size: 19px;
+      word-break: keep-all;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 44px;
+      padding: 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-weight: 800;
+      background: #ffffff;
+      color: var(--navy);
+    }
+
+    .button.primary {
+      background: var(--navy);
+      border-color: var(--navy);
+      color: #ffffff;
+      box-shadow: 0 12px 28px rgba(24, 40, 72, 0.25);
+    }
+
+    .quick-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      max-width: 680px;
+    }
+
+    .stat {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .stat strong {
+      display: block;
+      color: var(--navy);
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .stat span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .signal-console {
+      border: 1px solid #17233c;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0d1525;
+      box-shadow: var(--shadow);
+    }
+
+    .console-head {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: #b9c7dd;
+      font-size: 13px;
+    }
+
+    .lights {
+      display: flex;
+      gap: 7px;
+    }
+
+    .lights i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #d97706;
+    }
+
+    .lights i:nth-child(2) {
+      background: #0891b2;
+    }
+
+    .lights i:nth-child(3) {
+      background: #0f766e;
+    }
+
+    .spectrogram-wrap {
+      position: relative;
+      aspect-ratio: 1.08 / 1;
+      min-height: 420px;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #101827;
+    }
+
+    .scan-overlay {
+      position: absolute;
+      inset: auto 18px 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .scan-row {
+      display: grid;
+      grid-template-columns: 96px 1fr 72px;
+      align-items: center;
+      gap: 10px;
+      color: #dce7f7;
+      font-size: 12px;
+    }
+
+    .meter {
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.13);
+      overflow: hidden;
+    }
+
+    .meter span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--teal), var(--amber));
+    }
+
+    section {
+      padding: 72px 22px;
+    }
+
+    .section-inner {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+
+    .section-label {
+      margin: 0 0 10px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      color: var(--navy);
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .section-copy {
+      max-width: 760px;
+      margin: 0 0 34px;
+      color: var(--muted);
+      font-size: 17px;
+      word-break: keep-all;
+    }
+
+    .problem-solution {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .info-card {
+      min-height: 218px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(17, 24, 39, 0.06);
+    }
+
+    .info-card small {
+      display: block;
+      margin-bottom: 16px;
+      color: var(--teal);
+      font-weight: 900;
+    }
+
+    .info-card h3 {
+      margin: 0 0 12px;
+      color: var(--navy);
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .info-card p {
+      margin: 0;
+      color: var(--muted);
+      word-break: keep-all;
+    }
+
+    .pipeline {
+      background: #ffffff;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(110px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+
+    .flow-step {
+      min-width: 124px;
+      min-height: 130px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      position: relative;
+    }
+
+    .flow-step::after {
+      content: ">";
+      position: absolute;
+      top: 50%;
+      right: -10px;
+      transform: translateY(-50%);
+      color: var(--teal);
+      font-weight: 900;
+    }
+
+    .flow-step:last-child::after {
+      content: "";
+    }
+
+    .flow-step b {
+      display: block;
+      color: var(--navy);
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .flow-step span {
+      display: block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(17, 24, 39, 0.06);
+    }
+
+    .spec-table th,
+    .spec-table td {
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      font-size: 14px;
+    }
+
+    .spec-table th {
+      color: var(--muted);
+      font-weight: 800;
+      width: 44%;
+      background: #fbfcfe;
+    }
+
+    .spec-table td {
+      color: var(--navy);
+      font-weight: 800;
+    }
+
+    .result-board {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .metric {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(17, 24, 39, 0.06);
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--teal);
+      font-size: 36px;
+      line-height: 1;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .note {
+      margin-top: 14px;
+      padding: 16px;
+      border-left: 4px solid var(--amber);
+      background: var(--soft-amber);
+      color: #704400;
+      font-size: 14px;
+      word-break: keep-all;
+    }
+
+    .cards-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .label-card {
+      min-height: 150px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .label-card strong {
+      display: block;
+      color: var(--navy);
+      font-size: 20px;
+    }
+
+    .label-card span {
+      display: block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+      counter-reset: item;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 52px 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .timeline-item::before {
+      counter-increment: item;
+      content: counter(item, decimal-leading-zero);
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: var(--soft-teal);
+      color: var(--teal);
+      font-weight: 900;
+    }
+
+    .timeline-item h3 {
+      margin: 0 0 6px;
+      color: var(--navy);
+      font-size: 18px;
+    }
+
+    .timeline-item p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .cta {
+      padding: 72px 22px 86px;
+      background: var(--navy);
+      color: #ffffff;
+    }
+
+    .cta .section-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .cta h2 {
+      color: #ffffff;
+      max-width: 800px;
+    }
+
+    .cta p {
+      margin: 0;
+      color: #c9d4e5;
+      max-width: 760px;
+    }
+
+    .cta .button {
+      border-color: rgba(255, 255, 255, 0.22);
+      background: #ffffff;
+      color: var(--navy);
+    }
+
+    .footer {
+      padding: 24px 22px;
+      color: var(--muted);
+      background: #ffffff;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .footer-inner {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 980px) {
+      .hero {
+        padding-top: 32px;
+      }
+
+      .hero-grid,
+      .split,
+      .cta .section-inner {
+        grid-template-columns: 1fr;
+      }
+
+      .signal-console {
+        max-width: 720px;
+      }
+
+      .problem-solution,
+      .cards-4 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .nav {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .topbar-inner {
+        padding: 0 16px;
+      }
+
+      .hero,
+      section,
+      .cta {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .lead {
+        font-size: 17px;
+      }
+
+      .quick-stats,
+      .problem-solution,
+      .cards-4,
+      .result-board {
+        grid-template-columns: 1fr;
+      }
+
+      .spectrogram-wrap {
+        min-height: 330px;
+      }
+
+      .scan-row {
+        grid-template-columns: 78px 1fr 54px;
+        font-size: 11px;
+      }
+
+      .info-card,
+      .metric,
+      .label-card {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar" aria-label="상단 내비게이션">
+    <div class="topbar-inner">
+      <a class="brand" href="#top" aria-label="RF Drone Detection 홈">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>RF Drone Detection</span>
+      </a>
+      <nav class="nav" aria-label="페이지 섹션">
+        <a href="#why">목표</a>
+        <a href="#pipeline">파이프라인</a>
+        <a href="#results">실험 결과</a>
+        <a href="#roadmap">다음 단계</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="eyebrow"><span class="pulse" aria-hidden="true"></span>2.4GHz RF Signal Intelligence Capstone</div>
+          <h1>SDR로 구현하는<br>RF 드론 탐지 계층</h1>
+          <p class="lead">
+            Pluto+ SDR과 Python 신호처리 파이프라인으로 2.4GHz 대역의 RF IQ 데이터를 수집하고,
+            Energy Detection, STFT Spectrogram, CNN 분류, 2채널 AoA 추정으로 이어지는 드론 탐지 프로토타입입니다.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#pipeline">파이프라인 보기</a>
+            <a class="button" href="https://github.com/rjsxo943-gif/rf-drone-detection-capstone" target="_blank" rel="noreferrer">GitHub 열기</a>
+          </div>
+          <div class="quick-stats" aria-label="핵심 수치">
+            <div class="stat">
+              <strong>2.4GHz</strong>
+              <span>ISM band RF 수집</span>
+            </div>
+            <div class="stat">
+              <strong>128 x 509</strong>
+              <span>CNN 입력 spectrogram</span>
+            </div>
+            <div class="stat">
+              <strong>98.67%</strong>
+              <span>RF3 baseline test accuracy</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="signal-console" aria-label="RF spectrogram 시각화">
+          <div class="console-head">
+            <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+            <span>live_spectrogram_2437MHz.rx0</span>
+          </div>
+          <div class="spectrogram-wrap">
+            <canvas id="spectrogram" width="720" height="680" aria-label="움직이는 RF 스펙트로그램 그래픽"></canvas>
+            <div class="scan-overlay" aria-hidden="true">
+              <div class="scan-row">
+                <span>Wi-Fi</span>
+                <div class="meter"><span style="width: 78%"></span></div>
+                <b>0.91</b>
+              </div>
+              <div class="scan-row">
+                <span>Bluetooth</span>
+                <div class="meter"><span style="width: 46%"></span></div>
+                <b>0.42</b>
+              </div>
+              <div class="scan-row">
+                <span>Drone-like</span>
+                <div class="meter"><span style="width: 28%"></span></div>
+                <b>watch</b>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="why">
+      <div class="section-inner">
+        <p class="section-label">Project Positioning</p>
+        <h2>완성형 대드론 장비가 아니라,<br>탐지의 첫 계층을 직접 만드는 프로젝트</h2>
+        <p class="section-copy">
+          이 브랜치의 초점은 전체 시스템 완성보다 CNN 학습용 RF spectrogram 데이터 수집 파이프라인 안정화에 있습니다.
+          실제 SDR 입력, 저장된 IQ 파일, 시뮬레이션 입력을 같은 구조 안에서 다루며 재현 가능한 실험 흐름을 만드는 것이 핵심입니다.
+        </p>
+        <div class="problem-solution">
+          <article class="info-card">
+            <small>Problem</small>
+            <h3>눈에 보이지 않는 RF 신호</h3>
+            <p>드론 의심 신호는 영상보다 먼저 RF 대역에서 포착될 수 있습니다. 2.4GHz 혼잡 환경에서는 Wi-Fi, Bluetooth, 배경 신호를 함께 구분해야 합니다.</p>
+          </article>
+          <article class="info-card">
+            <small>Approach</small>
+            <h3>IQ에서 Spectrogram으로</h3>
+            <p>수신한 IQ block을 전처리하고 Energy Detector로 유효 block을 선별한 뒤, STFT spectrogram으로 변환해 CNN 입력으로 사용합니다.</p>
+          </article>
+          <article class="info-card">
+            <small>Outcome</small>
+            <h3>분류와 방향 추정의 연결</h3>
+            <p>RF3 baseline은 비드론 RF 신호 분류 기반을 만들고, 2채널 입력이 확보되면 coherence 검사와 위상차 기반 AoA 추정으로 확장됩니다.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="pipeline" class="pipeline">
+      <div class="section-inner">
+        <p class="section-label">Signal Pipeline</p>
+        <h2>RF IQ 수신부터 결과 저장까지 이어지는 처리 흐름</h2>
+        <p class="section-copy">
+          README 기준 파이프라인은 수신, 전처리, 탐지, 변환, 학습/추론, 2채널 방향 추정 branch로 분리됩니다.
+          현재 단일 채널 수집에서는 AoA 값이 비어 있을 수 있고, RX0/RX1 입력 확보 시 의미 있게 동작합니다.
+        </p>
+        <div class="flow" aria-label="RF 처리 파이프라인">
+          <div class="flow-step"><b>Receiver</b><span>sim, file, sdr 입력 선택</span></div>
+          <div class="flow-step"><b>Preprocess</b><span>DC offset, gain, phase 보정</span></div>
+          <div class="flow-step"><b>Energy Detection</b><span>active block 1차 선별</span></div>
+          <div class="flow-step"><b>STFT Spectrogram</b><span>128 x 509 CNN 입력 생성</span></div>
+          <div class="flow-step"><b>CNN Dataset or Inference</b><span>학습 데이터 수집 또는 추론</span></div>
+          <div class="flow-step"><b>Coherence + Phase</b><span>2채널 동일 신호 검사</span></div>
+          <div class="flow-step"><b>AoA + Report</b><span>도래각 추정과 결과 저장</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-inner split">
+        <div>
+          <p class="section-label">Current Parameters</p>
+          <h2>실험 기준이 명확한 RF 수집 설정</h2>
+          <p class="section-copy">
+            현재 브랜치는 2.437GHz 근처 중심 주파수, 5MSPS sample rate, 16,384 samples block 기준으로 정리되어 있습니다.
+          </p>
+        </div>
+        <table class="spec-table" aria-label="RF 수신 기준 표">
+          <tbody>
+            <tr><th>주파수 대역</th><td>2.4GHz ISM band</td></tr>
+            <tr><th>중심 주파수</th><td>2.437GHz 근처</td></tr>
+            <tr><th>Sample rate</th><td>5 MSPS</td></tr>
+            <tr><th>RF bandwidth</th><td>5 MHz</td></tr>
+            <tr><th>Block size</th><td>16,384 samples</td></tr>
+            <tr><th>Block time</th><td>약 3.28 ms</td></tr>
+            <tr><th>SDR</th><td>Pluto+</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="results">
+      <div class="section-inner split">
+        <div>
+          <p class="section-label">RF3 CNN Baseline</p>
+          <h2>Background, Bluetooth, WiFi를 구분하는 기준 모델</h2>
+          <p class="section-copy">
+            실제 드론 RF 데이터가 아직 확보되지 않았기 때문에, 현재 모델은 드론 탐지 모델이 아니라 2.4GHz 대역의 비드론 RF 신호를 구분하는 baseline CNN입니다.
+            대표 모델은 learning rate 0.001 조건에서 test set 225개 중 222개를 정확히 분류했습니다.
+          </p>
+          <div class="note">
+            결과는 현재 수집 데이터셋 내부의 baseline 성능입니다. 새로운 장소, 거리, 주파수, 장비 조건에 대한 일반화 성능은 추가 검증이 필요합니다.
+          </div>
+        </div>
+        <div class="result-board">
+          <div class="metric"><strong>2,572</strong><span>전체 selected spectrogram samples</span></div>
+          <div class="metric"><strong>1,500</strong><span>balanced training dataset samples</span></div>
+          <div class="metric"><strong>98.67%</strong><span>lr=0.001 test accuracy</span></div>
+          <div class="metric"><strong>3</strong><span>test set misclassified samples</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-inner">
+        <p class="section-label">Dataset Labels</p>
+        <h2>탐지 전에 먼저 구분해야 하는 RF 환경</h2>
+        <p class="section-copy">
+          수집 흐름은 label 입력, scan/capture loop, active block 선별, spectrogram 저장으로 이어집니다.
+          이 구조는 이후 drone-like 데이터를 추가해 탐지 모델로 확장하기 위한 바닥을 만듭니다.
+        </p>
+        <div class="cards-4">
+          <article class="label-card"><strong>Background</strong><span>일상 환경의 기본 RF 배경 신호</span></article>
+          <article class="label-card"><strong>Bluetooth</strong><span>burst 패턴이 두드러지는 근거리 무선 신호</span></article>
+          <article class="label-card"><strong>WiFi</strong><span>2.4GHz 채널 기반의 넓은 대역 신호</span></article>
+          <article class="label-card"><strong>Drone-like</strong><span>향후 실제 드론 RF 데이터 확보 후 확장할 대상</span></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap" class="pipeline">
+      <div class="section-inner">
+        <p class="section-label">Roadmap</p>
+        <h2>다음 단계는 데이터, 모델, 2채널 검증의 연결</h2>
+        <div class="timeline">
+          <article class="timeline-item">
+            <div>
+              <h3>CNN 학습용 spectrogram 데이터 수집 안정화</h3>
+              <p>Pluto+ SDR 또는 저장된 IQ 파일에서 의미 있는 block을 선별하고 label별 데이터셋을 재현 가능하게 구성합니다.</p>
+            </div>
+          </article>
+          <article class="timeline-item">
+            <div>
+              <h3>RF3 baseline checkpoint를 runtime pipeline에 연결</h3>
+              <p>학습된 CNN 모델을 실시간 또는 파일 기반 파이프라인에서 바로 사용할 수 있는 inference 구조로 정리합니다.</p>
+            </div>
+          </article>
+          <article class="timeline-item">
+            <div>
+              <h3>실제 drone-like 데이터 확보와 클래스 확장</h3>
+              <p>현재 비드론 3분류 baseline에 드론 의심 신호 데이터를 추가해 탐지 문제로 확장합니다.</p>
+            </div>
+          </article>
+          <article class="timeline-item">
+            <div>
+              <h3>RX0/RX1 2채널 AoA branch 검증</h3>
+              <p>coherence gate, phase difference, arcsin 기반 angle 변환을 실제 2채널 입력으로 검증합니다.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="section-inner">
+        <div>
+          <h2>RF 신호를 데이터셋으로 만들고, 데이터셋을 탐지 파이프라인으로 연결합니다.</h2>
+          <p>이 페이지는 `experiment/stft-128-hop32` 브랜치의 README와 RF3 CNN baseline 보고서를 기준으로 구성했습니다.</p>
+        </div>
+        <a class="button" href="https://github.com/rjsxo943-gif/rf-drone-detection-capstone/tree/experiment/stft-128-hop32" target="_blank" rel="noreferrer">브랜치 보기</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>RF Drone Detection Capstone Showcase</span>
+      <span>Based on experiment/stft-128-hop32 branch README and RF3 report</span>
+    </div>
+  </footer>
+
+  <script>
+    const canvas = document.getElementById("spectrogram");
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+    let t = 0;
+
+    function drawSpectrogram() {
+      const image = ctx.createImageData(w, h);
+      const data = image.data;
+
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          const i = (y * w + x) * 4;
+          const band = Math.sin((y * 0.035) + t) * 0.18 + Math.sin((x * 0.018) - t * 0.8) * 0.12;
+          const burstA = Math.exp(-Math.pow((x - ((t * 58) % (w + 120) - 60)) / 48, 2)) * Math.exp(-Math.pow((y - h * 0.38) / 68, 2));
+          const burstB = Math.exp(-Math.pow((x - ((t * 39 + 260) % (w + 160) - 80)) / 34, 2)) * Math.exp(-Math.pow((y - h * 0.62) / 42, 2));
+          const noise = Math.sin(x * 0.21 + y * 0.09 + t * 5) * 0.04;
+          const power = Math.max(0, Math.min(1, 0.18 + band + burstA * 0.82 + burstB * 0.65 + noise));
+
+          data[i] = 12 + power * 220;
+          data[i + 1] = 25 + power * 155;
+          data[i + 2] = 48 + power * 76;
+          data[i + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(image, 0, 0);
+      ctx.fillStyle = "rgba(255,255,255,0.82)";
+      ctx.font = "700 18px system-ui, sans-serif";
+      ctx.fillText("STFT 128 x 509", 24, 40);
+      ctx.font = "500 13px system-ui, sans-serif";
+      ctx.fillStyle = "rgba(220,231,247,0.78)";
+      ctx.fillText("center 2.437GHz · sample rate 5MSPS · block 16,384", 24, 64);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 1;
+      for (let gy = 92; gy < h - 120; gy += 72) {
+        ctx.beginPath();
+        ctx.moveTo(24, gy);
+        ctx.lineTo(w - 24, gy);
+        ctx.stroke();
+      }
+
+      t += 0.025;
+      requestAnimationFrame(drawSpectrogram);
+    }
+
+    drawSpectrogram();
+  </script>
+</body>
+</html>
