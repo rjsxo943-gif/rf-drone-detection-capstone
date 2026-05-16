@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RF Drone Detection Pipeline Block Diagram</title>
+  <style>
+    :root {
+      --ink: #142033;
+      --muted: #5e6b7d;
+      --line: #d9e2ee;
+      --paper: #f7f9fc;
+      --panel: #ffffff;
+      --navy: #17233f;
+      --teal: #0f766e;
+      --cyan: #0b8fb3;
+      --amber: #d97706;
+      --rose: #be123c;
+      --green-soft: #e8f7f4;
+      --blue-soft: #e8f4fb;
+      --amber-soft: #fff4dc;
+      --rose-soft: #fff0f3;
+      --gray-soft: #f1f5f9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.6;
+      letter-spacing: 0;
+    }
+
+    .page {
+      width: min(1220px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 44px 0 76px;
+    }
+
+    .hero {
+      padding: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, 0.13), rgba(11, 143, 179, 0.08)),
+        var(--panel);
+      box-shadow: 0 18px 45px rgba(20, 32, 51, 0.09);
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--navy);
+      font-size: clamp(34px, 5vw, 58px);
+      line-height: 1.08;
+      word-break: keep-all;
+    }
+
+    .lead {
+      max-width: 920px;
+      margin: 20px 0 0;
+      color: #3d4a5c;
+      font-size: 18px;
+      word-break: keep-all;
+    }
+
+    section {
+      margin-top: 34px;
+      padding: 32px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      color: var(--navy);
+      font-size: 28px;
+      line-height: 1.2;
+      word-break: keep-all;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      color: var(--navy);
+      font-size: 19px;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      word-break: keep-all;
+    }
+
+    code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: #eef2f7;
+      color: #123252;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 16px 0 0;
+      padding: 18px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: #101827;
+      color: #dce7f7;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 15px;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f3f6fa;
+      color: var(--navy);
+    }
+
+    td {
+      color: #405068;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .card {
+      min-height: 174px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 9px;
+      color: var(--navy);
+      font-size: 17px;
+    }
+
+    .card ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    .note {
+      margin-top: 16px;
+      padding: 18px;
+      border-left: 4px solid var(--amber);
+      border-radius: 0 8px 8px 0;
+      background: var(--amber-soft);
+      color: #704400;
+    }
+
+    .diagram {
+      margin-top: 20px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fbfcfe, #f3f7fb);
+      overflow-x: auto;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+      min-width: 820px;
+    }
+
+    .pipeline.wide {
+      grid-template-columns: repeat(6, minmax(150px, 1fr));
+      min-width: 980px;
+    }
+
+    .block {
+      min-height: 112px;
+      padding: 15px;
+      border: 1px solid #c7d3e1;
+      border-radius: 8px;
+      background: #ffffff;
+      position: relative;
+    }
+
+    .block:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      transform: translateY(-50%);
+      color: var(--teal);
+      font-weight: 900;
+      z-index: 2;
+    }
+
+    .block b {
+      display: block;
+      color: var(--navy);
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .block span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .current {
+      background: var(--green-soft);
+      border-color: #a7d8cf;
+    }
+
+    .decision {
+      background: var(--blue-soft);
+      border-color: #b9d9e7;
+    }
+
+    .warning {
+      background: var(--amber-soft);
+      border-color: #efd08d;
+    }
+
+    .stop {
+      background: var(--rose-soft);
+      border-color: #f1b7c5;
+    }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .state {
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .state b {
+      display: block;
+      color: var(--navy);
+    }
+
+    .state span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .quote {
+      padding: 22px;
+      border-radius: 8px;
+      background: var(--navy);
+      color: #ffffff;
+      font-size: 17px;
+      word-break: keep-all;
+    }
+
+    .quote p {
+      margin: 0;
+      color: #dce7f7;
+    }
+
+    @media (max-width: 920px) {
+      .hero,
+      section {
+        padding: 24px;
+      }
+
+      .principles,
+      .state-grid,
+      .split {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Pipeline Architecture Plan</p>
+      <h1>RF Drone Detection Pipeline Block Diagram</h1>
+      <p class="lead">제한된 예산과 연산 자원에서 RF 후보를 단계적으로 좁히고, 드론으로 확정된 RF track에 대해서만 방향을 출력하는 soft real-time RF 추적 파이프라인입니다.</p>
+    </header>
+
+    <section>
+      <h2>1. 설계 목적</h2>
+      <p>이 문서는 단순한 선형 처리 흐름이 아니라, scan mode, candidate list, gated decision, conservative AoA output, track mode를 포함한 전체 아키텍처를 설명합니다.</p>
+      <div class="quote">
+        <p>이 시스템은 하드 리얼타임 제어 시스템이 아니라, 제한된 연산 자원에서 의미 있는 RF 후보에만 계산을 집중하는 soft real-time RF 추적 파이프라인입니다.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 핵심 설계 철학</h2>
+      <div class="principles">
+        <article class="card">
+          <strong>Soft Real-time Tracking</strong>
+          <p>단일 block 즉시 판정보다 짧은 block window 기반 안정 판정을 우선합니다.</p>
+          <ul>
+            <li>1 block 약 3.3ms</li>
+            <li>7 blocks 약 23ms</li>
+            <li>15 blocks 약 50ms</li>
+          </ul>
+        </article>
+        <article class="card">
+          <strong>Electronic-first RF Sensing</strong>
+          <p>모터, 기계식 sweep, PID motion control layer를 제외하고 전자식 scan과 RF 채널 확장을 우선합니다.</p>
+        </article>
+        <article class="card">
+          <strong>Compute-aware Gating</strong>
+          <p>Energy Gate, CNN 안정성, Coherence Gate를 순차적으로 통과한 후보에만 무거운 계산을 수행합니다.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 전체 상태 흐름</h2>
+      <div class="diagram">
+        <div class="pipeline wide">
+          <div class="block current"><b>Scan Mode</b><span>full sweep cycle</span></div>
+          <div class="block current"><b>Candidate List</b><span>sweep 종료 후 검토</span></div>
+          <div class="block decision"><b>Candidate Analysis</b><span>STFT + CNN</span></div>
+          <div class="block decision"><b>Drone Candidate</b><span>window 안정성 통과</span></div>
+          <div class="block warning"><b>Coherence Validation</b><span>RX0/RX1 same event</span></div>
+          <div class="block current"><b>Track Mode</b><span>azimuth output + 추적</span></div>
+        </div>
+      </div>
+      <p class="note">Coherence 실패 시 바로 복귀하지 않고 watch/retry window를 거친 뒤, 실패가 유지되면 scan mode로 복귀합니다.</p>
+    </section>
+
+    <section>
+      <h2>4. Scan Mode와 Candidate List</h2>
+      <p>Scan Mode에서는 sweep 도중 Energy Detection이 발생해도 즉시 sweep을 중단하지 않습니다. 한 sweep은 끝까지 완료하고, energy가 검출된 center frequency/block은 candidate list에 등록합니다.</p>
+      <div class="diagram">
+        <div class="pipeline">
+          <div class="block current"><b>Start Sweep</b><span>scan mode atomic unit</span></div>
+          <div class="block current"><b>Center Frequency Step</b><span>5MHz step 등 설정 기반</span></div>
+          <div class="block decision"><b>Energy Detection</b><span>active RF 후보 탐색</span></div>
+          <div class="block current"><b>Candidate List Update</b><span>sweep interrupt 없음</span></div>
+          <div class="block current"><b>Sweep Complete</b><span>후보군 검토 시작</span></div>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>현재 축소형 구현</th><th>미래 광대역 확장</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>한 sweep에서 나온 후보군 전체를 STFT/CNN 분석</td>
+            <td>Candidate priority queue와 top-K analysis 적용</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. Main Gated Pipeline</h2>
+      <div class="diagram">
+        <div class="pipeline wide">
+          <div class="block current"><b>Candidate Review</b><span>sweep 후 후보 선택</span></div>
+          <div class="block current"><b>STFT Spectrogram</b><span>CNN 입력 feature</span></div>
+          <div class="block decision"><b>CNN Classification</b><span>spectrogram 기반 evidence</span></div>
+          <div class="block decision"><b>Class Stability Window</b><span>단일 block 확정 금지</span></div>
+          <div class="block warning"><b>Coherence Gate</b><span>drone candidate에만 수행</span></div>
+          <div class="block current"><b>AoA + Azimuth</b><span>drone confirmed only</span></div>
+        </div>
+      </div>
+      <p>CNN 입력 spectrogram에는 신호 세기, 시간-주파수 패턴, burst 길이와 반복성이 포함됩니다. 따라서 energy pattern, spectrogram pattern, burst consistency는 별도 점수가 아니라 CNN evidence 내부의 하위 근거로 봅니다.</p>
+    </section>
+
+    <section>
+      <h2>6. Decision Policy</h2>
+      <table>
+        <thead>
+          <tr><th>상황</th><th>동작</th><th>방향 표시</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>WiFi / Bluetooth / Background 안정</td><td>class name만 표시 후 scan mode 복귀</td><td>없음</td></tr>
+          <tr><td>판정 불안정</td><td>watch 또는 candidate 재검사</td><td>없음</td></tr>
+          <tr><td>Drone-like 안정</td><td>Coherence validation으로 이동</td><td>아직 없음</td></tr>
+          <tr><td>Drone confirmed + coherence pass</td><td>Phase difference, AoA, azimuth 계산</td><td>있음</td></tr>
+        </tbody>
+      </table>
+      <p class="note">AoA는 드론 판정 evidence가 아니라, 드론으로 확정된 RF track에만 제공되는 direction output입니다. WiFi/Bluetooth 같은 비드론 RF에는 각도를 표시하지 않습니다.</p>
+    </section>
+
+    <section>
+      <h2>7. 추천 초기 Window 값</h2>
+      <pre>energy_confirm_blocks: 3
+
+non_drone_window: 5
+non_drone_vote_required: 4
+
+drone_candidate_window: 7
+drone_candidate_vote_required: 5
+
+coherence_window: 5
+coherence_vote_required: 4
+
+aoa_stability_window: 7
+track_window: 15
+lost_tolerance_blocks: 5</pre>
+    </section>
+
+    <section>
+      <h2>8. Compute Saving 구조</h2>
+      <p>Naive 구조는 모든 block에 STFT, CNN, Coherence, AoA를 수행하지만, gated 구조는 후보가 줄어든 뒤에만 무거운 연산을 수행합니다.</p>
+      <pre>C_gated =
+N * C_energy
++ N * p_energy * (C_stft + C_cnn)
++ N * p_energy * p_drone * C_coherence
++ N * p_energy * p_drone * p_coherence * C_aoa</pre>
+      <div class="diagram">
+        <div class="pipeline">
+          <div class="block current"><b>N total blocks</b><span>전체 sweep 대상</span></div>
+          <div class="block current"><b>N_active</b><span>Energy Gate 통과</span></div>
+          <div class="block decision"><b>N_drone_candidate</b><span>CNN/window 통과</span></div>
+          <div class="block warning"><b>N_coherent</b><span>Coherence 통과</span></div>
+          <div class="block current"><b>N_confirmed</b><span>AoA 출력 대상</span></div>
+        </div>
+      </div>
+      <p class="note">핵심 관계: <code>N_confirmed &lt;&lt; N_drone_candidate &lt;&lt; N_active &lt;&lt; N_total</code></p>
+    </section>
+
+    <section>
+      <h2>9. Future Electronic Scaling</h2>
+      <div class="split">
+        <article class="card">
+          <strong>Future Electronic Scaling</strong>
+          <ul>
+            <li>+1~2 RF channels</li>
+            <li>Horizontal antenna array</li>
+            <li>Vertical antenna layer</li>
+            <li>Wider bandwidth RF front-end</li>
+            <li>Priority queue / top-K candidate analysis</li>
+          </ul>
+        </article>
+        <article class="card">
+          <strong>Not Selected</strong>
+          <ul>
+            <li>Motorized pan/tilt</li>
+            <li>Mechanical sweep</li>
+            <li>PID motion control</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>10. 출력 상태</h2>
+      <div class="state-grid">
+        <div class="state"><b>inactive</b><span>의미 있는 RF 신호 없음</span></div>
+        <div class="state"><b>non_drone_rf</b><span>class name only</span></div>
+        <div class="state"><b>watch</b><span>의심 근거 있으나 방향 숨김</span></div>
+        <div class="state"><b>drone_candidate</b><span>드론 가능성 높음, 방향 조건 전</span></div>
+        <div class="state"><b>drone_confirmed_with_direction</b><span>class + azimuth 표시</span></div>
+        <div class="state"><b>track</b><span>같은 center frequency 추적</span></div>
+        <div class="state"><b>lost</b><span>신호 말소, scan mode 복귀</span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>11. 핵심 발표 문장</h2>
+      <div class="quote">
+        <p>Scan Mode에서는 sweep 도중 energy가 검출되어도 즉시 중단하지 않고 candidate list에 등록한 뒤, sweep 종료 후 후보군을 상세 분석합니다. AoA는 드론 여부를 결정하기 위한 evidence가 아니라, 드론으로 확정되고 coherence gate를 통과한 RF track에 대해서만 제공되는 방향 출력입니다.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
