@@ -55,6 +55,8 @@ from src.ml.rf3_inference import (
 )
 
 __all__ = [
+    "RF4Classifier",
+    "RF4Result",
     "CNNResult",
     "DummyCNNClassifier",
     "KerasCNNClassifier",
@@ -78,3 +80,9 @@ __all__ = [
     "RF3Classifier",
     "RF3Result",
 ]
+
+
+from src.ml.rf4_inference import (
+    RF4Classifier,
+    RF4Result,
+)
