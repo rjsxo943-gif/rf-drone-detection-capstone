@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch import nn
 
 from src.ml import RF3SmallCNN
 
@@ -25,7 +24,13 @@ class RF4Result:
     confidence: float
     final_class: str
     probabilities: dict[str, float]
-    threshold: float
+
+    # 실제 판정에 사용된 threshold
+    applied_threshold: float
+
+    # 전체 정책값
+    general_threshold: float
+    drone_threshold: float
 
 
 class RF4Classifier:
@@ -36,16 +41,30 @@ class RF4Classifier:
     - input spectrogram shape: (128, 509)
     - model input shape: (1, 1, 128, 509)
     - classes: Background / WiFi / Bluetooth / Drone-like
+
+    Threshold 정책:
+    - Background / WiFi / Bluetooth: general_threshold 사용
+    - Drone-like: drone_threshold 사용
     """
 
     def __init__(
         self,
         checkpoint_path: str | Path,
-        threshold: float = 0.70,
+        general_threshold: float = 0.50,
+        drone_threshold: float = 0.70,
+        threshold: float | None = None,
         device: str | None = None,
     ) -> None:
         self.checkpoint_path = Path(checkpoint_path)
-        self.threshold = float(threshold)
+
+        # backward compatibility:
+        # 예전처럼 threshold 하나만 넣으면 둘 다 같은 값으로 사용
+        if threshold is not None:
+            general_threshold = float(threshold)
+            drone_threshold = float(threshold)
+
+        self.general_threshold = float(general_threshold)
+        self.drone_threshold = float(drone_threshold)
 
         if not self.checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {self.checkpoint_path}")
@@ -111,11 +130,17 @@ class RF4Classifier:
         class_id = int(np.argmax(probs))
         confidence = float(probs[class_id])
         class_name = str(self.class_names[class_id])
-        final_class = class_name if confidence >= self.threshold else "Unknown"
+
+        if class_name == "Drone-like":
+            applied_threshold = self.drone_threshold
+        else:
+            applied_threshold = self.general_threshold
+
+        final_class = class_name if confidence >= applied_threshold else "Unknown"
 
         probabilities = {
-            str(class_name): float(prob)
-            for class_name, prob in zip(self.class_names, probs)
+            str(name): float(prob)
+            for name, prob in zip(self.class_names, probs)
         }
 
         return RF4Result(
@@ -124,5 +149,7 @@ class RF4Classifier:
             confidence=confidence,
             final_class=final_class,
             probabilities=probabilities,
-            threshold=self.threshold,
+            applied_threshold=applied_threshold,
+            general_threshold=self.general_threshold,
+            drone_threshold=self.drone_threshold,
         )
