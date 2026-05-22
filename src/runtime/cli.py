@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.runtime.cnn_capture_actions import run_cnn_capture_action
 from src.runtime.scan_actions import run_scan_action
+from src.runtime.rf4_actions import run_rf4_single_block_action
 from src.calibration import load_calibration_params
 from src.runtime.calibration_actions import (
     DEFAULT_NOISE_OUTPUT,
@@ -61,9 +62,11 @@ def print_calibration_status() -> None:
 def print_menu() -> None:
     print()
     print("=== RF Drone Detection Runtime CLI ===")
+    print("[c] calibration status")
     print("[n] noise calibration")
     print("[p] phase/gain calibration")
     print("[s] start")
+    print("[r] RF4 single block inference")
     print("[q] quit")
 
 
@@ -147,6 +150,51 @@ def run_cli() -> None:
 
             except Exception as e:
                 print(f"[ERROR] cnn capture action failed: {e}")
+
+
+        elif cmd == "r":
+            print()
+            print("=== RF4 Single Block Inference ===")
+
+            model_path = input(
+                "model path [default=outputs/ml/rf4_cnn_baseline_v2/best_model.pt] > "
+            ).strip()
+            if not model_path:
+                model_path = "outputs/ml/rf4_cnn_baseline_v2/best_model.pt"
+
+            center_freq_text = input("center_freq Hz [default=2437000000] > ").strip()
+            center_freq = int(center_freq_text) if center_freq_text else 2_437_000_000
+
+            rx_index_text = input("rx_index [default=0] > ").strip()
+            rx_index = int(rx_index_text) if rx_index_text else 0
+
+            general_threshold_text = input("general_threshold [default=0.50] > ").strip()
+            general_threshold = (
+                float(general_threshold_text) if general_threshold_text else 0.50
+            )
+
+            drone_threshold_text = input("drone_threshold [default=0.70] > ").strip()
+            drone_threshold = (
+                float(drone_threshold_text) if drone_threshold_text else 0.70
+            )
+
+            try:
+                return_code = run_rf4_single_block_action(
+                    model_path=model_path,
+                    center_freq=center_freq,
+                    rx_index=rx_index,
+                    general_threshold=general_threshold,
+                    drone_threshold=drone_threshold,
+                )
+
+                if return_code != 0:
+                    print(f"[WARN] RF4 inference finished with non-zero return code: {return_code}")
+
+            except FileNotFoundError as e:
+                print(f"[ERROR] {e}")
+
+            except Exception as e:
+                print(f"[ERROR] RF4 inference failed: {e}")
 
         elif cmd == "":
             continue
