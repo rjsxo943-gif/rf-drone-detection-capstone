@@ -78,7 +78,7 @@ def make_classification_report_text(cm: np.ndarray) -> str:
     total = int(cm.sum())
     accuracy = total_correct / total if total > 0 else 0.0
 
-    lines.append("RF 3-Class Classification Report")
+    lines.append("RF 4-Class Classification Report")
     lines.append("=" * 40)
     lines.append(f"accuracy: {accuracy:.4f}")
     lines.append("")
