@@ -157,10 +157,10 @@ def run_cli() -> None:
             print("=== RF4 Single Block Inference ===")
 
             model_path = input(
-                "model path [default=outputs/ml/rf4_cnn_baseline_v2/best_model.pt] > "
+                "model path [default=outputs/ml/rf4_cnn_live2450_v2/best_model.pt] > "
             ).strip()
             if not model_path:
-                model_path = "outputs/ml/rf4_cnn_baseline_v2/best_model.pt"
+                model_path = "outputs/ml/rf4_cnn_live2450_v2/best_model.pt"
 
             center_freq_text = input("center_freq Hz [default=2437000000] > ").strip()
             center_freq = int(center_freq_text) if center_freq_text else 2_437_000_000
@@ -178,6 +178,14 @@ def run_cli() -> None:
                 float(drone_threshold_text) if drone_threshold_text else 0.70
             )
 
+            num_blocks_text = input("num_blocks [default=10] > ").strip()
+            num_blocks = int(num_blocks_text) if num_blocks_text else 10
+
+            min_drone_votes_text = input("min_drone_votes [default=3] > ").strip()
+            min_drone_votes = (
+                int(min_drone_votes_text) if min_drone_votes_text else 3
+            )
+
             try:
                 return_code = run_rf4_single_block_action(
                     model_path=model_path,
@@ -185,6 +193,8 @@ def run_cli() -> None:
                     rx_index=rx_index,
                     general_threshold=general_threshold,
                     drone_threshold=drone_threshold,
+                    num_blocks=num_blocks,
+                    min_drone_votes=min_drone_votes,
                 )
 
                 if return_code != 0:
