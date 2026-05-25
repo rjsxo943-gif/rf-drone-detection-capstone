@@ -45,6 +45,17 @@ from .aoa_gate import (
     should_compute_aoa,
 )
 
+# ============================================================
+# Sector quantizer
+# ============================================================
+
+from .sector_quantizer import (
+    SectorResult,
+    SectorVoter,
+    quantize_front_angle_to_sector,
+    sector_index_to_label,
+)
+
 
 __all__ = [
     # phase_diff
@@ -71,4 +82,10 @@ __all__ = [
     "AoAComputeGate",
     "normalize_class_name",
     "should_compute_aoa",
+
+    # sector quantizer
+    "SectorResult",
+    "SectorVoter",
+    "quantize_front_angle_to_sector",
+    "sector_index_to_label",
 ]

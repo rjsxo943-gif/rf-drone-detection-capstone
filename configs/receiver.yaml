@@ -29,7 +29,7 @@ num_samples: 16384
 # sim/file 공통 기본 채널 수
 # sim에서 RX0/RX1 2채널을 테스트하려면 2로 둔다.
 # file 모드에서는 저장된 파일의 채널 수와 맞아야 한다.
-num_channels: 1
+num_channels: 2
 #주의할 점은 file 모드야. num_channels: 2로 되어 있으면 
 #file_path의 IQ 파일도 (2, N) 또는 (N, 2) 형태여야 해. 
 #단일 채널 파일이면 num_channels: 1로 바꿔야 한다.
@@ -61,14 +61,14 @@ sdr:
   device: pluto_plus
   uri: ip:192.168.2.1
 
-  channels: [0]
+  channels: [0, 1]
 
   center_freq: 2437000000
   sample_rate: 5000000
   rf_bandwidth: 5000000
 
   gain_control_mode: manual
-  gain: 35
+  gain: 20
 
   num_samples: 16384
   block_size: 16384

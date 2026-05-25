@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from src.core.config import load_all_configs
+from src.calibration import load_calibration_params
+from src.runtime.calibration_actions import DEFAULT_NOISE_OUTPUT, DEFAULT_PHASE_GAIN_OUTPUT
 from src.ml.inference import build_cnn_classifier
 from src.receiver.factory import build_receiver
 from src.scan import FrequencyScanner, PrecisionAnalyzer
@@ -77,6 +79,15 @@ def setup_scan_runtime(
     ml_cfg = cfg["ml"]
 
     scan_cfg = _unwrap_scan_cfg(cfg["scan"])
+    
+    print()
+    print("=== SCAN CONFIG DEBUG ===")
+    print(f"scan_loop file : {__file__}")
+    print(f"PROJECT_ROOT   : {PROJECT_ROOT}")
+    print(f"config_dir     : {Path(config_dir).resolve()}")
+    print(f"scan_cfg       : {scan_cfg}")
+    print("=========================")
+    print()
 
     start_freq = float(scan_cfg["start_freq"])
     stop_freq = float(scan_cfg["stop_freq"])
@@ -117,11 +128,32 @@ def setup_scan_runtime(
     if cnn_enabled:
         cnn_classifier = build_cnn_classifier(ml_cfg)
 
+
+    phase_offset_rad = 0.0
+
+    try:
+        calib = load_calibration_params(
+            noise_path=PROJECT_ROOT / DEFAULT_NOISE_OUTPUT,
+            phase_gain_path=PROJECT_ROOT / DEFAULT_PHASE_GAIN_OUTPUT,
+            require_noise=False,
+            require_phase_gain=False,
+        )
+
+        if calib.phase_gain is not None:
+            phase_offset_rad = float(calib.phase_gain.phase_offset_rad)
+            print(f"[AoA CAL] phase_offset_rad loaded: {phase_offset_rad:.10f} rad")
+
+    except Exception as e:
+        print(f"[AoA CAL WARN] failed to load phase calibration: {e}")
+        print("[AoA CAL WARN] use phase_offset_rad=0.0")
+
     analyzer = PrecisionAnalyzer(
         receiver=receiver,
         num_samples=num_samples,
         sample_rate=receiver_cfg["sample_rate"],
         antenna_spacing_m=cfg["aoa"]["antenna_spacing_m"],
+        coherence_threshold=0.001,
+        phase_offset_rad=phase_offset_rad,
         save_dir=str(precision_dir),
         save_spectrogram=save_spectrogram,
         save_stft=save_stft,
@@ -196,7 +228,9 @@ def run_one_scan_cycle(
                 f"cnn={result.cnn_label}({result.cnn_score}) | "
                 f"coherence={result.coherence} | "
                 f"angle={result.angle_deg} deg | "
+                f"sector={result.sector_index}({result.sector_label}) | "
                 f"valid={result.angle_valid} | "
+                f"sector_valid={result.sector_valid} | "
                 f"spectrogram_path={result.spectrogram_path}"
             )
 

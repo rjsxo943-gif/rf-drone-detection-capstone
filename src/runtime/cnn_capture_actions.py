@@ -17,6 +17,7 @@ from src.calibration import load_calibration_params
 from src.core import get_block_size, load_all_configs
 from src.preprocess import get_cnn_input_iq, normalize_iq, remove_dc_offset
 from src.receiver import build_receiver
+from src.scan.scan_policy import build_scan_freqs
 from src.runtime.calibration_actions import (
     DEFAULT_NOISE_OUTPUT,
     DEFAULT_PHASE_GAIN_OUTPUT,
@@ -74,33 +75,42 @@ def _ensure_2d_iq(iq: np.ndarray) -> np.ndarray:
     raise ValueError(f"iq must be 1D or 2D, got shape={iq.shape}")
 
 
-def _build_scan_freqs_from_config(scan_cfg: dict[str, Any]) -> list[int]:
-    band_start = int(scan_cfg.get("band_start", 2_400_000_000))
-    band_end = int(scan_cfg.get("band_end", 2_485_000_000))
-    channel_bw = int(scan_cfg.get("channel_bw", 5_000_000))
+def _unwrap_scan_cfg(scan_cfg_raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    configs/scan.yaml이
 
-    if band_end < band_start:
-        raise ValueError(f"band_end must be >= band_start: {band_start}, {band_end}")
+    scan:
+      start_freq: ...
+      stop_freq: ...
 
-    if channel_bw <= 0:
-        raise ValueError(f"channel_bw must be positive: {channel_bw}")
+    형태일 때 내부 scan dict만 꺼낸다.
+    이미 평평한 dict면 그대로 반환한다.
+    """
+    if "scan" in scan_cfg_raw and isinstance(scan_cfg_raw["scan"], dict):
+        return scan_cfg_raw["scan"]
 
-    freqs = list(range(band_start, band_end + 1, channel_bw))
+    return scan_cfg_raw
 
-    if not freqs:
-        raise ValueError("scan frequency list is empty")
 
-    return freqs
+def _build_scan_freqs_from_config(scan_cfg: dict[str, Any]) -> list[float]:
+    scan_cfg = _unwrap_scan_cfg(scan_cfg)
 
+    start_freq = float(scan_cfg["start_freq"])
+    stop_freq = float(scan_cfg["stop_freq"])
+    step_freq = float(scan_cfg["step_freq"])
+
+    return build_scan_freqs(
+        start_freq=start_freq,
+        stop_freq=stop_freq,
+        step_freq=step_freq,
+    )
 
 def _set_receiver_center_freq(receiver: Any, center_freq: int) -> None:
-    """
-    PlutoReceiver / SimReceiver / RawFileReceiver 구조 차이를 최대한 흡수하기 위한 setter.
-
-    PlutoReceiver는 내부에 self.sdr.rx_lo를 가질 가능성이 높고,
-    SimReceiver / RawFileReceiver는 center_freq 속성만 바뀌어도 metadata 용도로 충분하다.
-    """
     center_freq = int(center_freq)
+
+    if hasattr(receiver, "set_center_freq"):
+        receiver.set_center_freq(center_freq)
+        return
 
     if hasattr(receiver, "center_freq"):
         try:
@@ -110,10 +120,9 @@ def _set_receiver_center_freq(receiver: Any, center_freq: int) -> None:
 
     if hasattr(receiver, "sdr"):
         sdr = getattr(receiver, "sdr")
-        if sdr is not None:
-            if hasattr(sdr, "rx_lo"):
-                sdr.rx_lo = center_freq
-                return
+        if sdr is not None and hasattr(sdr, "rx_lo"):
+            sdr.rx_lo = center_freq
+            return
 
     if hasattr(receiver, "_set_center_freq"):
         receiver._set_center_freq(center_freq)
@@ -372,7 +381,7 @@ def run_cnn_capture_action(
 
     receiver_cfg = configs.get("receiver", {})
     detect_cfg = configs.get("detect", {})
-    scan_cfg = configs.get("scan", {})
+    scan_cfg = _unwrap_scan_cfg(configs.get("scan", {}))
     ml_cfg = configs.get("ml", {})
 
     block_size = int(get_block_size(configs))
@@ -406,6 +415,7 @@ def run_cnn_capture_action(
     min_pass_blocks = int(scan_cfg.get("min_pass_blocks", 1))
     precision_blocks_per_candidate = int(scan_cfg.get("precision_blocks_per_candidate", 1))
     settle_sec = float(scan_cfg.get("settle_sec", 0.02))
+    scan_score_db_threshold = float(scan_cfg.get("scan_score_db_threshold", 78.0))
 
     calib = load_calibration_params(
         noise_path=Path(DEFAULT_NOISE_OUTPUT),
@@ -540,7 +550,10 @@ def run_cnn_capture_action(
                     last_scan_score_db = scan_score_db
                     last_detection_ratio = detection_ratio
 
-                    if detection_ratio >= min_detection_ratio:
+                    score_passed = scan_score_db >= scan_score_db_threshold
+                    ratio_passed = detection_ratio >= min_detection_ratio
+
+                    if ratio_passed or score_passed:
                         pass_count += 1
 
                     if verbose:
@@ -549,6 +562,7 @@ def run_cnn_capture_action(
                             f"block={scan_block_idx + 1}/{scan_blocks} "
                             f"ratio={detection_ratio:.3f} "
                             f"score={scan_score_db:.2f} dB "
+                            f"score_pass={score_passed} "
                             f"pass={pass_count}/{min_pass_blocks}"
                         )
                 if stop_requested:
@@ -591,11 +605,16 @@ def run_cnn_capture_action(
                         threshold=noise_threshold,
                     )
 
-                    if detection_ratio < min_detection_ratio:
+                    precision_score_db = _compute_fft_score_db(iq_dc)
+                    score_passed = precision_score_db >= scan_score_db_threshold
+                    ratio_passed = detection_ratio >= min_detection_ratio
+
+                    if not (ratio_passed or score_passed):
                         if verbose:
                             print(
                                 f"[skip precision] f={center_freq / 1e9:.4f} GHz "
-                                f"ratio={detection_ratio:.3f}"
+                                f"ratio={detection_ratio:.3f} "
+                                f"score={precision_score_db:.2f} dB"
                             )
                         continue
 
@@ -636,6 +655,8 @@ def run_cnn_capture_action(
                             for v in np.mean(_ensure_2d_iq(iq_raw), axis=-1)
                         ],
                         "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "precision_score_db": float(precision_score_db),
+                        "scan_score_db_threshold": float(scan_score_db_threshold),
                     }
 
                     sample_path = _save_cnn_sample(

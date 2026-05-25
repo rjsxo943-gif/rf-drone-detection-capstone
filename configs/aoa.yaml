@@ -26,7 +26,7 @@ wavelength_m: 0.125
 
 # 안테나 간격
 # 2.4GHz 기준 λ/2 = 0.0625 m
-antenna_spacing_m: 0.0625
+antenna_spacing_m: 0.06
 
 # AoA 계산 방식
 method: phase_difference

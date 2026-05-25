@@ -7,6 +7,7 @@ from src.runtime.cnn_capture_actions import run_cnn_capture_action
 from src.runtime.scan_actions import run_scan_action
 from src.runtime.rf4_actions import run_rf4_single_block_action
 from src.calibration import load_calibration_params
+from src.runtime.scan_loop import run_continuous_scan_loop
 from src.runtime.calibration_actions import (
     DEFAULT_NOISE_OUTPUT,
     DEFAULT_PHASE_GAIN_OUTPUT,
@@ -67,6 +68,7 @@ def print_menu() -> None:
     print("[p] phase/gain calibration")
     print("[s] start")
     print("[r] RF4 single block inference")
+    print("[a] AoA sector scan")
     print("[q] quit")
 
 
@@ -101,6 +103,27 @@ def run_cli() -> None:
             print("=== Run Phase/Gain Calibration ===")
             print("주의: 신호원을 두 안테나의 정면 0도 방향에 두고 진행하는 것이 기준이다.")
             run_phase_gain_calibration_action()
+
+        elif cmd == "a":
+            print()
+            print("=== AoA Sector Scan Start ===")
+            print("PrecisionAnalyzer 기반 scan loop를 실행한다.")
+            print("angle_deg와 8-sector 방향을 함께 출력한다.")
+            print("scan cycle 사이에 q 입력 후 Enter를 누르면 중단한다.")
+            print()
+
+            try:
+                return_code = run_continuous_scan_loop(
+                    stop_key="q",
+                    cycle_delay_sec=0.0,
+                    verbose=True,
+                )
+
+                if return_code != 0:
+                    print(f"[WARN] AoA sector scan finished with non-zero return code: {return_code}")
+
+            except Exception as e:
+                print(f"[ERROR] AoA sector scan failed: {e}")
 
         elif cmd == "s":
             print()

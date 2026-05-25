@@ -59,6 +59,16 @@ class FrequencyScanner:
         self.scan_blocks = int(scan_blocks)
         self.min_pass_blocks = int(min_pass_blocks)
 
+        print()
+        print("=== FREQUENCY SCANNER DEBUG ===")
+        print(f"start_freq     : {start_freq}")
+        print(f"stop_freq      : {stop_freq}")
+        print(f"step_freq      : {step_freq}")
+        print(f"num_scan_freqs : {len(self.scan_freqs)}")
+        print(f"scan_freqs MHz : {[round(f / 1e6, 3) for f in self.scan_freqs]}")
+        print("===============================")
+        print()
+
     def _set_center_freq(self, center_freq: float) -> None:
         """
         receiver 종류에 따라 center frequency 설정.

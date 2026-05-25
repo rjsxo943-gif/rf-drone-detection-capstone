@@ -10,7 +10,7 @@ from src.features.spectrogram import compute_dual_channel_stft_branch
 from src.aoa.coherence import coherence_gate
 from src.aoa.phase_diff import estimate_phase_diff
 from src.aoa.angle_estimator import phase_diff_to_angle
-
+from src.aoa.sector_quantizer import quantize_front_angle_to_sector
 
 @dataclass
 class PrecisionAnalysisResult:
@@ -34,6 +34,10 @@ class PrecisionAnalysisResult:
     spectrogram_path: str | None
     rx0_stft_path: str | None
     rx1_stft_path: str | None
+
+    sector_index: int | None
+    sector_label: str | None
+    sector_valid: bool | None
 
 
 class PrecisionAnalyzer:
@@ -63,6 +67,7 @@ class PrecisionAnalyzer:
         noverlap: int = 384,
         nfft: int = 512,
         coherence_threshold: float = 0.6,
+        phase_offset_rad: float = 0.0,
         save_dir: str | None = None,
         save_spectrogram: bool = False,
         save_stft: bool = False,
@@ -77,6 +82,7 @@ class PrecisionAnalyzer:
         self.noverlap = int(noverlap)
         self.nfft = int(nfft)
         self.coherence_threshold = float(coherence_threshold)
+        self.phase_offset_rad = float(phase_offset_rad)
 
         self.save_dir = Path(save_dir) if save_dir is not None else None
         self.save_spectrogram = bool(save_spectrogram)
@@ -96,6 +102,9 @@ class PrecisionAnalyzer:
             return PrecisionAnalysisResult(
                 center_freq=float(center_freq),
                 stft_done=False,
+                sector_index=None,
+                sector_label=None,
+                sector_valid=None,
                 cnn_enabled=self.cnn_classifier is not None,
                 cnn_label=None,
                 cnn_score=None,
@@ -173,8 +182,15 @@ class PrecisionAnalyzer:
             phase_diff_rad=phase_result.phase_diff_rad,
             carrier_freq=float(center_freq),
             antenna_spacing_m=self.antenna_spacing_m,
-            phase_offset_rad=0.0,
+            phase_offset_rad=self.phase_offset_rad,
             clip_input=True,
+        )
+
+        sector_result = quantize_front_angle_to_sector(
+            angle_result.angle_deg if angle_result.valid and coherence_result.passed else None,
+            num_sectors=8,
+            min_angle=-90.0,
+            max_angle=90.0,
         )
 
         return PrecisionAnalysisResult(
@@ -195,4 +211,7 @@ class PrecisionAnalyzer:
             spectrogram_path=str(spectrogram_path) if spectrogram_path is not None else None,
             rx0_stft_path=str(rx0_stft_path) if rx0_stft_path is not None else None,
             rx1_stft_path=str(rx1_stft_path) if rx1_stft_path is not None else None,
+            sector_index=sector_result.sector_index,
+            sector_label=sector_result.sector_label,
+            sector_valid=sector_result.valid,
         )
