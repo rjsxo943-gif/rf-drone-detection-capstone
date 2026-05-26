@@ -77,6 +77,7 @@ def setup_scan_runtime(
     receiver_cfg = cfg["receiver"]
     paths_cfg = cfg["paths"]
     ml_cfg = cfg["ml"]
+    stft_cfg = ml_cfg.get("stft", {})
 
     scan_cfg = _unwrap_scan_cfg(cfg["scan"])
     
@@ -152,8 +153,13 @@ def setup_scan_runtime(
         num_samples=num_samples,
         sample_rate=receiver_cfg["sample_rate"],
         antenna_spacing_m=cfg["aoa"]["antenna_spacing_m"],
-        coherence_threshold=0.001,
+        nperseg=int(stft_cfg.get("nperseg", 128)),
+        noverlap=int(stft_cfg.get("noverlap", 96)),
+        nfft=int(stft_cfg.get("nfft", 128)),
+        coherence_threshold=float(scan_cfg.get("coherence_threshold", 0.001)),
         phase_offset_rad=phase_offset_rad,
+        settle_sec=float(scan_cfg.get("settle_sec", 0.0)),
+        precision_blocks=int(scan_cfg.get("precision_blocks_per_candidate", 1)),
         save_dir=str(precision_dir),
         save_spectrogram=save_spectrogram,
         save_stft=save_stft,
@@ -229,6 +235,8 @@ def run_one_scan_cycle(
                 f"coherence={result.coherence} | "
                 f"angle={result.angle_deg} deg | "
                 f"sector={result.sector_index}({result.sector_label}) | "
+                f"sel_block={result.selected_block_index}/{result.precision_blocks} | "
+                f"sel_score={result.selection_score} | "
                 f"valid={result.angle_valid} | "
                 f"sector_valid={result.sector_valid} | "
                 f"spectrogram_path={result.spectrogram_path}"

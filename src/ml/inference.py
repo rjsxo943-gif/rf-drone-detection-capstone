@@ -112,6 +112,119 @@ class KerasCNNClassifier:
         )
 
 
+
+class LegacyRF4Live2450Factory:
+    """
+    outputs/ml/rf4_cnn_live2450_v2/best_model.pt 호환용 legacy CNN.
+
+    checkpoint key 구조:
+    - features.0.net.*
+    - features.1.net.*
+    - features.2.net.*
+    - features.3.net.*
+    - classifier.2.*
+    """
+
+    @staticmethod
+    def build(num_classes: int):
+        import torch.nn as nn
+
+        class ConvBlock(nn.Module):
+            def __init__(
+                self,
+                in_channels: int,
+                out_channels: int,
+                stride: int = 1,
+            ) -> None:
+                super().__init__()
+
+                self.net = nn.Sequential(
+                    nn.Conv2d(
+                        in_channels,
+                        out_channels,
+                        kernel_size=3,
+                        stride=stride,
+                        padding=1,
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(out_channels),
+                    nn.ReLU(inplace=True),
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        class LegacyRF4Live2450CNN(nn.Module):
+            def __init__(self, num_classes: int = 4) -> None:
+                super().__init__()
+
+                self.features = nn.Sequential(
+                    ConvBlock(1, 16, stride=1),
+                    ConvBlock(16, 32, stride=2),
+                    ConvBlock(32, 64, stride=2),
+                    ConvBlock(64, 128, stride=2),
+                    nn.AdaptiveAvgPool2d((1, 1)),
+                )
+
+                self.classifier = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Dropout(p=0.2),
+                    nn.Linear(128, num_classes),
+                )
+
+            def forward(self, x):
+                x = self.features(x)
+                logits = self.classifier(x)
+                return logits
+
+        return LegacyRF4Live2450CNN(num_classes=num_classes)
+
+
+class RF4CNNClassifierAdapter:
+    """
+    RF4Classifier를 기존 PrecisionAnalyzer가 기대하는 CNNResult 형식으로 감싸는 adapter.
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        class_names: list[str],
+        device: str = "cpu",
+        general_threshold: float = 0.50,
+        drone_threshold: float = 0.70,
+    ) -> None:
+        from src.ml.rf4_inference import RF4Classifier
+
+        self.class_names = class_names
+        self.rf4 = RF4Classifier(
+            checkpoint_path=model_path,
+            general_threshold=general_threshold,
+            drone_threshold=drone_threshold,
+            device=device,
+        )
+
+    def predict(self, spectrogram):
+        import numpy as np
+
+        x = np.asarray(spectrogram, dtype=np.float32)
+
+        if x.ndim == 3 and x.shape[-1] == 1:
+            x = x[..., 0]
+
+        result = self.rf4.predict_array(x)
+
+        probabilities = [
+            float(result.probabilities[name])
+            for name in self.rf4.class_names
+        ]
+
+        return CNNResult(
+            class_name=result.class_name,
+            class_index=int(result.class_id),
+            confidence=float(result.confidence),
+            probabilities=probabilities,
+        )
+
 class TorchCNNClassifier:
     """
     PyTorch 기반 SpectrogramCNN classifier.
@@ -127,10 +240,13 @@ class TorchCNNClassifier:
         model_path: str | None,
         class_names: list[str],
         device: str = "cpu",
+        model_arch: str = "current",
     ) -> None:
         self.model_path = model_path
         self.class_names = class_names
         self.device_name = device
+        self.mean = 0.0
+        self.std = 1.0
 
         try:
             import torch
@@ -140,12 +256,18 @@ class TorchCNNClassifier:
                 "Torch 모델을 사용하려면 torch를 설치해야 합니다."
             ) from exc
 
-        from src.ml.model_2dcnn import build_model
-
         self.torch = torch
         self.device = torch.device(device)
+        self.model_arch = str(model_arch).lower().strip()
 
-        self.model = build_model(num_classes=len(class_names))
+        if self.model_arch in ["legacy_rf4_live2450", "legacy", "rf4_live2450_v2"]:
+            self.model = LegacyRF4Live2450Factory.build(
+                num_classes=len(class_names),
+            )
+        else:
+            from src.ml.model_2dcnn import build_model
+            self.model = build_model(num_classes=len(class_names))
+
         self.model.to(self.device)
         self.model.eval()
 
@@ -159,6 +281,12 @@ class TorchCNNClassifier:
             raise FileNotFoundError(f"Torch model checkpoint not found: {path}")
 
         checkpoint = self.torch.load(path, map_location=self.device)
+
+        if isinstance(checkpoint, dict):
+            if "mean" in checkpoint:
+                self.mean = float(checkpoint["mean"])
+            if "std" in checkpoint:
+                self.std = float(checkpoint["std"])
 
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             state_dict = checkpoint["model_state_dict"]
@@ -179,6 +307,8 @@ class TorchCNNClassifier:
 
         if x.ndim != 2:
             raise ValueError(f"Expected spectrogram shape (H, W), got {x.shape}")
+
+        x = (x - self.mean) / max(self.std, 1e-8)
 
         x_tensor = self.torch.from_numpy(x).float()
         x_tensor = x_tensor.unsqueeze(0).unsqueeze(0)  # (H, W) -> (B, C, H, W)
@@ -234,6 +364,20 @@ def build_cnn_classifier(ml_cfg: dict[str, Any]):
             class_names=class_names,
             input_shape=input_shape,
         )
+    
+    if backend == "rf4":
+        model_path = inference_cfg.get("model_path")
+
+        if model_path in [None, "", "null", "None"]:
+            raise ValueError("inference.model_path is required for backend='rf4'")
+
+        return RF4CNNClassifierAdapter(
+            model_path=model_path,
+            class_names=class_names,
+            device=inference_cfg.get("device", "cpu"),
+            general_threshold=float(inference_cfg.get("general_threshold", 0.50)),
+            drone_threshold=float(inference_cfg.get("drone_threshold", 0.70)),
+        )
 
     if backend == "torch":
         model_cfg = ml_cfg.get("model", {})
@@ -250,9 +394,10 @@ def build_cnn_classifier(ml_cfg: dict[str, Any]):
             model_path=model_path,
             class_names=class_names,
             device=inference_cfg.get("device", "cpu"),
+            model_arch=inference_cfg.get("model_arch", "current"),
         )
 
     raise ValueError(
         f"Unsupported CNN inference backend: {backend}. "
-        "Expected 'dummy', 'keras', or 'torch'."
+        "Expected 'dummy', 'keras', 'torch', or 'rf4'." 
     )

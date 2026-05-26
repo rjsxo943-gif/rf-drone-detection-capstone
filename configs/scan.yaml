@@ -5,13 +5,13 @@ scan:
 
   num_samples: 16384
 
-  threshold: 1000000.0
+  threshold: 4000000.0
   scan_blocks: 5
-  min_pass_blocks: 1
+  min_pass_blocks: 2
 
   scan_score_db_threshold: 76.0
   precision_blocks_per_candidate: 10
-  settle_sec: 0.0
+  settle_sec: 0.02
   coherence_threshold: 0.001
 
   mode: full_cycle_triggered_analysis
@@ -20,4 +20,4 @@ scan:
   save_spectrogram: true
   save_stft: false
 
-  cnn_enabled: false
+  cnn_enabled: true

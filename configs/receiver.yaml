@@ -68,7 +68,7 @@ sdr:
   rf_bandwidth: 5000000
 
   gain_control_mode: manual
-  gain: 20
+  gain: 15
 
   num_samples: 16384
   block_size: 16384

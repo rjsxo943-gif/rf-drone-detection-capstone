@@ -317,8 +317,33 @@ def _save_cnn_sample(
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = f"sample_{sample_index:06d}.npz"
+    label = str(metadata.get("label", "unknown"))
+    session_id = str(metadata.get("session_id", "nosession"))
+    center_freq = int(metadata.get("center_freq", 0))
+    center_freq_mhz = int(round(center_freq / 1e6)) if center_freq > 0 else 0
+    rx_index = int(metadata.get("rx_index", 0))
+
+    filename = (
+        f"{sample_index:04d}__"
+        f"{session_id}__"
+        f"{label}__"
+        f"cf{center_freq_mhz}__"
+        f"rx{rx_index}.npz"
+    )
+
     sample_path = output_dir / filename
+
+    # 매우 드문 경우지만 같은 파일명이 이미 있으면 suffix를 붙여 충돌 방지
+    if sample_path.exists():
+        suffix = 1
+        while True:
+            alt_filename = filename.replace(".npz", f"__dup{suffix:02d}.npz")
+            alt_path = output_dir / alt_filename
+            if not alt_path.exists():
+                filename = alt_filename
+                sample_path = alt_path
+                break
+            suffix += 1
 
     save_kwargs: dict[str, Any] = {
         "spectrogram": spectrogram.astype(np.float32),
@@ -376,6 +401,10 @@ def run_cnn_capture_action(
 
     if capture_cfg.max_saved <= 0:
         raise ValueError(f"max_saved must be positive, got {capture_cfg.max_saved}")
+
+    # Background 데이터는 신호 trigger가 없어도 저장해야 한다.
+    # 예: background_live_gain15_alloff
+    is_background_capture = "background" in capture_cfg.label.lower()
 
     configs = load_all_configs("configs")
 
@@ -568,7 +597,7 @@ def run_cnn_capture_action(
                 if stop_requested:
                     break
 
-                if pass_count < min_pass_blocks:
+                if (not is_background_capture) and pass_count < min_pass_blocks:
                     continue
 
                 if verbose:
@@ -609,7 +638,7 @@ def run_cnn_capture_action(
                     score_passed = precision_score_db >= scan_score_db_threshold
                     ratio_passed = detection_ratio >= min_detection_ratio
 
-                    if not (ratio_passed or score_passed):
+                    if (not is_background_capture) and not (ratio_passed or score_passed):
                         if verbose:
                             print(
                                 f"[skip precision] f={center_freq / 1e9:.4f} GHz "

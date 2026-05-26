@@ -94,11 +94,21 @@ export:
   quantize: false
 
 inference:
-  backend: torch   # dummy, keras, torch
-  model_path: outputs/ml/rf4_cnn_live2450_v2/best_model.pt
+  backend: rf4
+  model_path: outputs/ml/rf4_cnn_live_gain15_v1/best_model.pt
   device: cpu
-  dummy_class_name: Background
-  dummy_confidence: 0.0
+  general_threshold: 0.50
+  drone_threshold: 0.70
+
+
+
+#inference:
+#  backend: torch   # dummy, keras, torch
+#  model_path: outputs/ml/rf4_cnn_live2450_v2/best_model.pt
+#  model_arch: legacy_rf4_live2450
+#  device: cpu
+#  dummy_class_name: Background
+#  dummy_confidence: 0.0
 
 #inference:
 #  backend: keras
