@@ -124,6 +124,27 @@ class PlutoReceiver(BaseReceiver):
                 # warmup 실패는 실제 read에서 다시 잡는다.
                 pass
 
+    def set_center_freq(self, center_freq: int | float) -> None:
+        """
+        런타임 중 Pluto+ SDR 중심주파수를 변경한다.
+
+        FrequencyScanner가 scan.yaml의 start_freq/stop_freq를 따라
+        주파수를 바꿀 때 이 메서드를 호출한다.
+
+        중요:
+        - self.center_freq만 바꾸면 안 됨
+        - 실제 SDR LO인 self.sdr.rx_lo도 같이 바꿔야 함
+        """
+        self.center_freq = int(center_freq)
+
+        if self.sdr is None:
+            raise RuntimeError("SDR object is not initialized.")
+
+        self.sdr.rx_lo = int(self.center_freq)
+
+        # LO 변경 직후 이전 버퍼가 남아 있을 수 있으므로 버림
+        self._warmup()
+
     def read_samples(self, num_samples: int) -> np.ndarray:
         """
         Pluto+에서 num_samples만큼 IQ sample을 읽는다.

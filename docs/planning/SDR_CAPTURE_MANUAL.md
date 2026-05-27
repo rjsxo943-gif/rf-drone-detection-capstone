@@ -744,9 +744,10 @@ iio_info -u ip:192.168.2.1
 
 
 데이터 수집
+
 PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
   --label home_wifihot_ch6_on_2437_gain10_1m \
-  --blocks 400 \
+  --blocks 4 \
   --center-freq 2437000000 \
   --gain 10 \
   --channel 0 \
@@ -789,90 +790,110 @@ find data/processed/cnn_capture/home_wifihot_ch6_on_2437_gain10_1m/WIFI \
 
 
 
-BT
-  PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
-  --label home_bt_audio_on_2450_gain10_1m \
-  --blocks 400 \
-  --center-freq 2450000000 \
-  --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
-
-  PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
-  --label home_bt_audio_on_2437_gain10_1m \
-  --blocks 400 \
-  --center-freq 2437000000 \
-  --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
-
-  PYTHONPATH=. python scripts/capture_wifi_compare_128.py \
-  --label home_bt_audio_on_2460_gain10_1m \
-  --blocks 400 \
-  --center-freq 2460000000 \
-  --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
-
 데이터 수집용
-PYTHONPATH=. python scripts/capture_bluetooth_selected_only_128hop32.py \
-  --label home_bt_audio_on_2437_gain10_0.4m \
-  --blocks 4000 \
+PYTHONPATH=. python scripts/capture_cnn_spectrogram_target_128hop32.py \
+  --label Background \
+  --session-id BG_wifi_offaxis_cf2437_g15_att10dB_dNA_s01 \
   --center-freq 2437000000 \
   --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
+  --target-selected 150 \
+  --max-attempts 2000 \
+  --accept-mode background_fail
+
+BG_all_off_cf2437_g15_att10dB_dNA_s01
+BG_wifi_offaxis_cf2437_g15_att10dB_dNA_s01
 
 
-  PYTHONPATH=. python scripts/analyze_capture_folder.py \
-  --folder data/processed/cnn_capture/home_bt_audio_on_2437_gain10_1m/20260509_185407
-
-
-PYTHONPATH=. python scripts/select_bluetooth_meaningful_blocks.py \
-  --folder data/processed/cnn_capture/home_bt_audio_on_2437_gain10_1m/20260509_185407
-
-PYTHONPATH=. python scripts/select_bluetooth_meaningful_blocks.py \
---folder data/processed/cnn_capture/home_bt_audio_on_2450_gain10_1m/20260509_184541
-
-PYTHONPATH=. python scripts/select_bluetooth_meaningful_blocks.py \
---folder data/processed/cnn_capture/home_bt_audio_on_2460_gain10_1m/20260509_185751
-
-
-background
-
-cd ~/projects/rf-drone-detection-capstone
-
-PYTHONPATH=. python scripts/capture_background_selected_only_128hop32.py \
-  --label home_bg_2437_gain10 \
-  --blocks 1000 \
-  --target-selected 500 \
+PYTHONPATH=. python scripts/capture_cnn_spectrogram_target_128hop32.py \
+  --label WiFi \
+  --session-id 20260521_WIFI_youtube_cf2437_g15_d0p4m_s01 \
   --center-freq 2437000000 \
-  --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
+  --gain 15 \
+  --target-selected 100 \
+  --max-attempts 6000 \
+  --accept-mode energy_like
 
-  PYTHONPATH=. python scripts/capture_background_selected_only_128hop32.py \
-  --label home_bg_2450_gain10 \
-  --blocks 1000 \
-  --target-selected 500 \
+
+PYTHONPATH=. python scripts/capture_cnn_spectrogram_target_128hop32.py \
+  --label Bluetooth \
+  --session-id 20260521_BT_call_cf2450_g15_att10dB_d0P4m_s01 \
+  --center-freq 2450000000 \
+  --gain 15 \
+  --target-selected 100 \
+  --max-attempts 100000 \
+  --accept-mode bluetooth_meaningful \
+  --keep-weak
+
+--burst-threshold 24 --p99-threshold 0 --weak-burst-threshold 18
+
+
+BT_music_cf2450_g15_att10dB_d0p4m_s01
+20260521_BT_pairing_cf2450_g15_att10dB_d0p4m_s01
+20260521_BT_call_cf2450_g15_att10dB_d0P4m_s01
+
+PYTHONPATH=. python scripts/capture_cnn_spectrogram_target_128hop32.py \
+  --label Drone_like \
+  --session-id 20260521_DRONE_hover_cf2450_g10_d3m_s01 \
   --center-freq 2450000000 \
   --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
+  --target-selected 100 \
+  --max-attempts 1000 \
+  --accept-mode energy_like
 
 
-  PYTHONPATH=. python scripts/capture_background_selected_only_128hop32.py \
-  --label home_bg_2460_gain10 \
-  --blocks 1000 \
-  --target-selected 500 \
-  --center-freq 2460000000 \
-  --gain 10 \
-  --channel 0 \
-  --vmin -40 \
-  --vmax 40
+
+
+
+1. controller_on
+   조종기만 켠 상태
+
+2. link_active
+   드론 전원 ON + 조종기 연결 완료
+   모터 OFF
+   영상/카메라 링크 켜진 상태
+
+PYTHONPATH=. python scripts/capture_drone_dataset.py \
+  --state connected_idle \
+  --num-save 50 \
+  --center-freq 2437000000 \
+  --gain 20 \
+  --distance-cm 50 \
+  --attempt 1 \
+  --min-burst-score 0.30
+
+
+3. motor_on_ground
+   가능하면 프로펠러 제거 후 모터 동작
+   또는 바닥 고정 상태에서 아주 짧게
+
+4. hover
+   안전한 장소에서 실제 호버링
+
+
+
+scripts
+
+PYTHONPATH=. python scripts/ml/smoke_test_rf4_classifier.py \
+  --model outputs/ml/rf4_cnn_baseline_v2/best_model.pt \
+  --root data/processed/cnn_capture \
+  --max-per-class 50 \
+  --general-threshold 0.50 \
+  --drone-threshold 0.70
+
+
+  PYTHONPATH=. python scripts/run_runtime_cli.py
+  ping -c 3 192.168.2.1
+iio_info -u ip:192.168.2.1
+
+
+각도 연속 추정
+scripts/aoa_stream_tone.py 
+
+PYTHONPATH=. python scripts/aoa_stream_tone.py \
+  --center-freq 2449000000 \
+  --signal-freq 2450000000 \
+  --antenna-spacing 0.060 \
+  --avg-window 5 \
+  --interval 0.10
+
+  PYTHONPATH=. python scripts/run_runtime_cli.py
