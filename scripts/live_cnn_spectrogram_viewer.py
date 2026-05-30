@@ -22,12 +22,16 @@ import argparse
 import csv
 import math
 import time
+from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
+
+from scripts.ml.train_rf_binary_cnn import SmallRFBinaryCNN
 
 from src.core import get_project_root, load_all_configs
 from src.preprocess import get_cnn_input_iq, normalize_iq, remove_dc_offset
@@ -108,6 +112,18 @@ CSV_COLUMNS = [
     "cnn_spec_p95",
     "cnn_spec_p99",
     "cnn_spec_max",
+    "decision_mode",
+    "cnn_model_path",
+    "cnn_prob_drone",
+    "cnn_threshold",
+    "cnn_raw_decision",
+    "temporal_window",
+    "candidate_vote_k",
+    "confirmed_vote_k",
+    "temporal_history",
+    "candidate_status",
+    "confirmed_status",
+    "final_decision",
     "latency_sec",
     "processing_time_sec",
 ]
@@ -147,6 +163,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--latest-image-dir", default="outputs/live_viewer/latest")
     parser.add_argument("--save-latest", action="store_true")
     parser.add_argument("--no-display", action="store_true")
+
+    # Decision / CNN inference modes
+    parser.add_argument(
+        "--decision-mode",
+        default="none",
+        choices=["none", "raw", "gain-aware", "temporal", "hybrid"],
+        help=(
+            "none: no CNN inference, raw: fixed threshold, "
+            "gain-aware: gain-specific threshold, temporal: fixed threshold + vote, "
+            "hybrid: gain-aware threshold + vote"
+        ),
+    )
+    parser.add_argument(
+        "--cnn-model",
+        default="",
+        help="Path to trained RF binary CNN model. Required unless decision-mode=none.",
+    )
+    parser.add_argument("--cnn-device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument("--drone-threshold", type=float, default=0.50)
+    parser.add_argument("--drone-threshold-g25", type=float, default=0.35)
+    parser.add_argument("--drone-threshold-g30", type=float, default=0.80)
+    parser.add_argument("--temporal-window", type=int, default=5)
+    parser.add_argument("--candidate-vote-k", type=int, default=2)
+    parser.add_argument("--confirmed-vote-k", type=int, default=3)
+    parser.add_argument("--reset-temporal-on-no-signal", action="store_true")
+    parser.add_argument("--show-candidate-as-drone", action="store_true")
     return parser.parse_args()
 
 
@@ -460,6 +502,102 @@ def update_display(
     return image_handle, text_handle
 
 
+
+def resolve_cnn_device(device_arg: str) -> str:
+    if device_arg == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return device_arg
+
+
+def load_binary_cnn_model(model_path: str, device: str) -> SmallRFBinaryCNN:
+    if not model_path:
+        raise ValueError("--cnn-model is required when decision-mode is not 'none'")
+
+    model_file = to_project_path(model_path)
+    if not model_file.exists():
+        raise FileNotFoundError(f"CNN model not found: {model_file}")
+
+    model = SmallRFBinaryCNN(num_classes=2)
+    ckpt = torch.load(model_file, map_location=device)
+
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        model.load_state_dict(ckpt["model_state_dict"])
+    else:
+        model.load_state_dict(ckpt)
+
+    model.to(device)
+    model.eval()
+    return model
+
+
+def infer_drone_probability(
+    model: SmallRFBinaryCNN,
+    spec: np.ndarray,
+    device: str,
+) -> float:
+    arr = np.asarray(spec, dtype=np.float32)
+
+    if arr.ndim != 2:
+        raise ValueError(f"CNN spectrogram must be 2D, got shape={arr.shape}")
+
+    x = torch.from_numpy(arr[None, None, :, :]).to(device)
+
+    with torch.no_grad():
+        logits = model(x)
+        probs = torch.softmax(logits, dim=1)
+
+    return float(probs[0, 1].detach().cpu().item())
+
+
+def select_drone_threshold(
+    decision_mode: str,
+    gain: Any,
+    default_threshold: float,
+    threshold_g25: float,
+    threshold_g30: float,
+) -> float:
+    if decision_mode not in {"gain-aware", "hybrid"}:
+        return default_threshold
+
+    try:
+        gain_value = float(gain)
+    except (TypeError, ValueError):
+        return default_threshold
+
+    if abs(gain_value - 25.0) < 1e-6:
+        return threshold_g25
+    if abs(gain_value - 30.0) < 1e-6:
+        return threshold_g30
+
+    return default_threshold
+
+
+def update_temporal_decision(
+    history: deque[int],
+    raw_decision: int,
+    window: int,
+    candidate_vote_k: int,
+    confirmed_vote_k: int,
+) -> tuple[list[int], bool, bool, str]:
+    history.append(int(raw_decision))
+
+    recent = list(history)[-window:]
+    vote_count = sum(recent)
+
+    candidate = vote_count >= candidate_vote_k
+    confirmed = vote_count >= confirmed_vote_k
+
+    if confirmed:
+        final_decision = "Confirmed Drone"
+    elif candidate:
+        final_decision = "Drone-like Candidate"
+    else:
+        final_decision = "NonDrone"
+
+    return recent, candidate, confirmed, final_decision
+
+
+
 def append_csv_log(csv_path: Path, row: dict[str, Any]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     file_exists = csv_path.exists()
@@ -495,6 +633,15 @@ def build_side_text(row: dict[str, Any]) -> str:
         f"cnn_p95: {row['cnn_spec_p95']:.6g}",
         f"cnn_p99: {row['cnn_spec_p99']:.6g}",
         f"cnn_max: {row['cnn_spec_max']:.6g}",
+        "",
+        f"decision_mode: {row.get('decision_mode', 'none')}",
+        f"cnn_prob_drone: {row.get('cnn_prob_drone', math.nan):.4f}",
+        f"cnn_threshold: {row.get('cnn_threshold', math.nan):.4f}",
+        f"raw_decision: {row.get('cnn_raw_decision', 'NA')}",
+        f"history: {row.get('temporal_history', '')}",
+        f"candidate: {row.get('candidate_status', False)}",
+        f"confirmed: {row.get('confirmed_status', False)}",
+        f"final: {row.get('final_decision', 'NA')}",
     ]
     return "\n".join(lines)
 
@@ -503,7 +650,9 @@ def print_update(row: dict[str, Any]) -> None:
     print(
         "[update={update_index:04d}] status={status:<12} "
         "signal_ratio={signal_ratio:.3f} raw_peak={raw_peak:.6g} "
-        "clip_ratio={clip_ratio:.6g} suggestion={suggestion}".format(**row),
+        "clip_ratio={clip_ratio:.6g} suggestion={suggestion} "
+        "mode={decision_mode} prob={cnn_prob_drone:.4f} "
+        "th={cnn_threshold:.3f} raw={cnn_raw_decision} final={final_decision}".format(**row),
         flush=True,
     )
 
@@ -531,6 +680,13 @@ def main() -> None:
     gain = infer_receiver_value(receiver_cfg, "gain", args.gain)
     nperseg, noverlap, nfft = infer_stft_params(ml_cfg, args)
 
+    cnn_device = resolve_cnn_device(args.cnn_device)
+    cnn_model = None
+    if args.decision_mode != "none":
+        cnn_model = load_binary_cnn_model(args.cnn_model, cnn_device)
+
+    temporal_history: deque[int] = deque(maxlen=args.temporal_window)
+
     print("=== Live CNN Spectrogram Viewer v1 ===")
     print(f"session_id         : {session_id}")
     print(f"csv_log            : {csv_path}")
@@ -544,6 +700,13 @@ def main() -> None:
     print(f"memo               : {args.memo}")
     print(f"blocks_per_update  : {args.blocks_per_update}")
     print(f"stft               : nperseg={nperseg}, noverlap={noverlap}, nfft={nfft}")
+    print(f"decision_mode      : {args.decision_mode}")
+    print(f"cnn_model          : {args.cnn_model or 'NA'}")
+    print(f"cnn_device         : {cnn_device}")
+    print(f"drone_threshold    : {args.drone_threshold}")
+    print(f"threshold_g25/g30  : {args.drone_threshold_g25} / {args.drone_threshold_g30}")
+    print(f"temporal_window    : {args.temporal_window}")
+    print(f"candidate/confirmed: {args.candidate_vote_k} / {args.confirmed_vote_k}")
     print("note               : YAML is loaded once at startup. Restart to apply changes.")
     print("Press Ctrl+C to stop.")
 
@@ -613,6 +776,49 @@ def main() -> None:
             else:
                 cnn_features = empty_cnn_features()
 
+            cnn_prob_drone = math.nan
+            cnn_threshold = math.nan
+            cnn_raw_decision = "NA"
+            temporal_history_text = ""
+            candidate_status = False
+            confirmed_status = False
+            final_decision = "NA"
+
+            if args.decision_mode != "none":
+                cnn_threshold = select_drone_threshold(
+                    args.decision_mode,
+                    gain,
+                    args.drone_threshold,
+                    args.drone_threshold_g25,
+                    args.drone_threshold_g30,
+                )
+
+                if spec is not None and cnn_model is not None:
+                    cnn_prob_drone = infer_drone_probability(cnn_model, spec, cnn_device)
+                    raw_is_drone = int(cnn_prob_drone >= cnn_threshold)
+                else:
+                    raw_is_drone = 0
+
+                cnn_raw_decision = "Drone" if raw_is_drone else "NonDrone"
+
+                if args.reset_temporal_on_no_signal and status == "NO_SIGNAL":
+                    temporal_history.clear()
+
+                if args.decision_mode in {"temporal", "hybrid"}:
+                    recent, candidate_status, confirmed_status, final_decision = update_temporal_decision(
+                        temporal_history,
+                        raw_is_drone,
+                        args.temporal_window,
+                        args.candidate_vote_k,
+                        args.confirmed_vote_k,
+                    )
+                    temporal_history_text = "".join(str(x) for x in recent)
+
+                    if args.show_candidate_as_drone and candidate_status:
+                        final_decision = "Drone-like Candidate"
+                else:
+                    final_decision = cnn_raw_decision
+
             processing_time_sec = time.perf_counter() - loop_start
             latency_sec = processing_time_sec
 
@@ -635,6 +841,18 @@ def main() -> None:
                 "suggestion": suggestion,
                 **asdict(raw_features),
                 **cnn_features,
+                "decision_mode": args.decision_mode,
+                "cnn_model_path": args.cnn_model,
+                "cnn_prob_drone": cnn_prob_drone,
+                "cnn_threshold": cnn_threshold,
+                "cnn_raw_decision": cnn_raw_decision,
+                "temporal_window": args.temporal_window,
+                "candidate_vote_k": args.candidate_vote_k,
+                "confirmed_vote_k": args.confirmed_vote_k,
+                "temporal_history": temporal_history_text,
+                "candidate_status": candidate_status,
+                "confirmed_status": confirmed_status,
+                "final_decision": final_decision,
                 "latency_sec": latency_sec,
                 "processing_time_sec": processing_time_sec,
             }
@@ -643,7 +861,7 @@ def main() -> None:
             print_update(row)
 
             title = (
-                f"Live CNN Spectrogram | {status} | "
+                f"Live CNN Spectrogram | {status} | {final_decision} | "
                 f"gain={gain} | d={args.distance_m}m | update={update_index}"
             )
             side_text = build_side_text(row)

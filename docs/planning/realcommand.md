@@ -228,3 +228,59 @@ bluetooth_g25_phone_moving_d2m           200
   --skip-inference
 
   controller_only_g25_d1m_side90    200
+
+
+--------------------------------------------
+viewer
+--------------------------------------------
+모드 설명서
+ PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py --help | grep -E "decision-mode|cnn-model|threshold|temporal|candidate|confirmed"
+
+
+기존 viewer처럼 CNN 없이 실행
+PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 30 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "viewer_none_mode_test" \
+  --decision-mode none
+
+
+Raw CNN 모드
+PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 30 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "raw_cnn_mode_test" \
+  --decision-mode raw \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50
+
+
+Gain-aware 모드
+PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 30 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "gain_aware_mode_test" \
+  --decision-mode gain-aware \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80
+
+
+최종 추천 Hybrid 모드
+PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 30 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "hybrid_gain_aware_temporal_test" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3
