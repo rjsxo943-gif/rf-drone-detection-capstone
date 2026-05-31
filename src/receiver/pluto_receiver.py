@@ -113,6 +113,58 @@ class PlutoReceiver(BaseReceiver):
         if hasattr(self.sdr, gain_attr):
             setattr(self.sdr, gain_attr, self.gain)
 
+    def get_gain(self) -> float:
+        """
+        현재 receiver에 저장된 RX hardware gain 값을 반환한다.
+        """
+        return float(self.gain)
+
+    def set_gain(
+        self,
+        gain: int | float,
+        *,
+        gain_control_mode: str | None = None,
+        warmup_reads: int = 0,
+    ) -> float:
+        """
+        Live viewer 실행 중 RX hardware gain을 변경한다.
+
+        반환:
+            실제 적용된 gain 값
+        """
+        self.gain = float(gain)
+
+        if gain_control_mode is not None:
+            self.gain_control_mode = str(gain_control_mode)
+
+        if not hasattr(self, "sdr") or self.sdr is None:
+            return self.gain
+
+        for ch in self.channels:
+            self._set_channel_gain(ch)
+
+        for _ in range(max(0, int(warmup_reads))):
+            try:
+                _ = self.sdr.rx()
+            except Exception:
+                break
+
+        return self.gain
+
+    def increase_gain(
+        self,
+        delta_db: int | float,
+        *,
+        min_gain: float = -3.0,
+        max_gain: float = 71.0,
+    ) -> float:
+        """
+        현재 gain에서 delta_db만큼 증가/감소시킨다.
+        """
+        next_gain = self.gain + float(delta_db)
+        next_gain = max(float(min_gain), min(float(max_gain), next_gain))
+        return self.set_gain(next_gain)
+
     def _warmup(self) -> None:
         """
         초기 버퍼 안정화를 위해 몇 번 읽고 버린다.

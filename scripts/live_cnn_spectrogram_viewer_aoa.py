@@ -134,6 +134,20 @@ CSV_COLUMNS = [
     "feature_match_max_error_pct",
     "feature_match_mean_error_pct",
     "feature_match_tolerance_pct",
+    "aoa_enabled",
+    "aoa_status",
+    "aoa_deg",
+    "aoa_phase_diff_rad",
+    "aoa_phase_diff_raw_rad",
+    "aoa_phase_offset_rad",
+    "aoa_coherence",
+    "aoa_antenna_spacing_m",
+    "aoa_calibration_deg",
+    "aoa_deg_smooth",
+    "aoa_smooth_status",
+    "aoa_smooth_count",
+    "aoa_smooth_window",
+    "aoa_smooth_min_valid",
 ]
 
 
@@ -197,6 +211,73 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--confirmed-vote-k", type=int, default=3)
     parser.add_argument("--reset-temporal-on-no-signal", action="store_true")
     parser.add_argument("--show-candidate-as-drone", action="store_true")
+
+    # AoA / dual-channel phase-difference estimate
+    parser.add_argument("--enable-aoa", action="store_true")
+    parser.add_argument(
+        "--aoa-antenna-spacing-m",
+        type=float,
+        default=0.061,
+        help="RX0-RX1 antenna spacing in meters. Default is about half wavelength at 2.45 GHz.",
+    )
+    parser.add_argument(
+        "--aoa-calibration-deg",
+        type=float,
+        default=0.0,
+        help="Angle offset added to estimated AoA after phase-to-angle conversion.",
+    )
+    parser.add_argument(
+        "--aoa-phase-offset-rad",
+        type=float,
+        default=0.0,
+        help="RX1-RX0 phase offset in radians. This is subtracted before AoA conversion.",
+    )
+    parser.add_argument(
+        "--aoa-auto-phase-calibration",
+        action="store_true",
+        help="Estimate phase offset at startup. Put the source at boresight/front 0 degree.",
+    )
+    parser.add_argument(
+        "--aoa-calibration-blocks",
+        type=int,
+        default=30,
+        help="Number of blocks used for startup phase calibration.",
+    )
+    parser.add_argument(
+        "--aoa-min-coherence",
+        type=float,
+        default=0.20,
+        help="Minimum channel coherence for AoA to be considered usable.",
+    )
+    parser.add_argument(
+        "--aoa-min-signal-ratio",
+        type=float,
+        default=5.0,
+        help="Minimum signal_ratio required before AoA is computed.",
+    )
+    parser.add_argument(
+        "--aoa-gate-mode",
+        default="candidate",
+        choices=["signal", "raw-drone", "candidate", "confirmed"],
+        help=(
+            "signal: valid RF signal only, "
+            "raw-drone: CNN raw Drone only, "
+            "candidate: Candidate or Confirmed Drone, "
+            "confirmed: Confirmed Drone only"
+        ),
+    )
+    parser.add_argument(
+        "--aoa-smooth-window",
+        type=int,
+        default=5,
+        help="Number of recent valid AoA estimates used for circular moving average.",
+    )
+    parser.add_argument(
+        "--aoa-smooth-min-valid",
+        type=int,
+        default=3,
+        help="Minimum valid AoA estimates required to output smoothed AoA.",
+    )
     return parser.parse_args()
 
 
@@ -439,6 +520,285 @@ def empty_cnn_features() -> dict[str, float]:
         "cnn_spec_p99": math.nan,
         "cnn_spec_max": math.nan,
     }
+
+
+def empty_aoa_features(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "aoa_enabled": bool(getattr(args, "enable_aoa", False)),
+        "aoa_status": "DISABLED" if not getattr(args, "enable_aoa", False) else "UNAVAILABLE",
+        "aoa_deg": math.nan,
+        "aoa_phase_diff_rad": math.nan,
+        "aoa_phase_diff_raw_rad": math.nan,
+        "aoa_phase_offset_rad": float(getattr(args, "aoa_phase_offset_rad", 0.0)),
+        "aoa_coherence": math.nan,
+        "aoa_antenna_spacing_m": float(getattr(args, "aoa_antenna_spacing_m", math.nan)),
+        "aoa_calibration_deg": float(getattr(args, "aoa_calibration_deg", 0.0)),
+        "aoa_deg_smooth": math.nan,
+        "aoa_smooth_status": "NO_SMOOTH",
+        "aoa_smooth_count": 0,
+        "aoa_smooth_window": int(getattr(args, "aoa_smooth_window", 5)),
+        "aoa_smooth_min_valid": int(getattr(args, "aoa_smooth_min_valid", 3)),
+    }
+
+
+def wrap_to_pi(angle_rad: float) -> float:
+    return float(np.angle(np.exp(1j * float(angle_rad))))
+
+
+def estimate_dual_rx_phase_diff(iq_block: np.ndarray) -> tuple[float, float, str]:
+    """
+    Return raw RX1-RX0 phase difference and coherence.
+    """
+    arr = ensure_2d_iq(iq_block)
+    if arr.shape[0] < 2:
+        return math.nan, math.nan, "NEED_DUAL_RX"
+
+    ch0 = np.asarray(arr[0], dtype=np.complex64).reshape(-1)
+    ch1 = np.asarray(arr[1], dtype=np.complex64).reshape(-1)
+
+    if ch0.size == 0 or ch1.size == 0:
+        return math.nan, math.nan, "EMPTY_IQ"
+
+    n = min(ch0.size, ch1.size)
+    ch0 = ch0[:n]
+    ch1 = ch1[:n]
+
+    p0 = float(np.mean(np.abs(ch0).astype(np.float64) ** 2))
+    p1 = float(np.mean(np.abs(ch1).astype(np.float64) ** 2))
+    denom = math.sqrt(max(p0 * p1, EPS))
+
+    cross = np.mean(ch1 * np.conj(ch0))
+    phase_diff_raw = float(np.angle(cross))
+    coherence = float(np.abs(cross) / denom)
+
+    return phase_diff_raw, coherence, "OK"
+
+
+def calibrate_aoa_phase_offset(
+    receiver: Any,
+    *,
+    block_size: int,
+    calibration_blocks: int,
+    min_coherence: float,
+) -> float:
+    """
+    Estimate RX1-RX0 phase offset using circular mean.
+    Place known source at antenna front/0 degree before running.
+    """
+    phase_vectors: list[complex] = []
+    used = 0
+
+    print("[AOA CAL] Start phase calibration. Put source at front/0 degree.")
+
+    for idx in range(max(1, int(calibration_blocks))):
+        block = receiver.read_block(block_size)
+        block = remove_dc_offset(block)
+
+        phase_raw, coherence, status = estimate_dual_rx_phase_diff(block)
+
+        if (
+            status == "OK"
+            and math.isfinite(phase_raw)
+            and math.isfinite(coherence)
+            and coherence >= float(min_coherence)
+        ):
+            phase_vectors.append(np.exp(1j * phase_raw))
+            used += 1
+
+        if idx % 5 == 0:
+            print(
+                f"[AOA CAL] block={idx:03d} status={status} "
+                f"phase={phase_raw:.4f} coh={coherence:.3f} used={used}"
+            )
+
+    if not phase_vectors:
+        print("[AOA CAL] Failed. No valid dual-channel phase samples.")
+        return 0.0
+
+    offset = float(np.angle(np.mean(np.asarray(phase_vectors, dtype=np.complex128))))
+    print(f"[AOA CAL] Done. phase_offset_rad={offset:.6f} used={used}/{calibration_blocks}")
+    return offset
+
+
+
+def circular_mean_deg(values_deg: list[float]) -> float:
+    if not values_deg:
+        return math.nan
+
+    radians = np.deg2rad(np.asarray(values_deg, dtype=np.float64))
+    vector = np.mean(np.exp(1j * radians))
+
+    if abs(vector) < EPS:
+        return math.nan
+
+    return float(np.rad2deg(np.angle(vector)))
+
+
+def update_aoa_smoothing(
+    aoa_features: dict[str, Any],
+    aoa_history: list[float],
+    *,
+    window: int,
+    min_valid: int,
+) -> dict[str, Any]:
+    window = max(1, int(window))
+    min_valid = max(1, int(min_valid))
+
+    aoa_status = str(aoa_features.get("aoa_status", ""))
+    aoa_deg = float(aoa_features.get("aoa_deg", math.nan))
+
+    if aoa_status == "OK" and math.isfinite(aoa_deg):
+        aoa_history.append(aoa_deg)
+
+    if len(aoa_history) > window:
+        del aoa_history[:-window]
+
+    count = len(aoa_history)
+
+    aoa_features["aoa_smooth_count"] = count
+    aoa_features["aoa_smooth_window"] = window
+    aoa_features["aoa_smooth_min_valid"] = min_valid
+
+    if count >= min_valid:
+        smooth_deg = circular_mean_deg(aoa_history[-window:])
+        aoa_features["aoa_deg_smooth"] = smooth_deg
+        aoa_features["aoa_smooth_status"] = "OK" if math.isfinite(smooth_deg) else "BAD_MEAN"
+    else:
+        aoa_features["aoa_deg_smooth"] = math.nan
+        aoa_features["aoa_smooth_status"] = "WAIT_VALID"
+
+    return aoa_features
+
+
+
+def should_compute_aoa(
+    args: argparse.Namespace,
+    status: str,
+    raw_features: RawFeatures,
+    cnn_raw_decision: str,
+    final_decision: str,
+) -> tuple[bool, str]:
+    if not getattr(args, "enable_aoa", False):
+        return False, "DISABLED"
+
+    if status == "OVERLOAD":
+        return False, "GATED_OVERLOAD"
+
+    if status not in {"WEAK_SIGNAL", "VALID_SIGNAL"}:
+        return False, "GATED_NO_SIGNAL"
+
+    if raw_features.signal_ratio < float(args.aoa_min_signal_ratio):
+        return False, "GATED_LOW_SR"
+
+    mode = getattr(args, "aoa_gate_mode", "candidate")
+
+    if mode == "signal":
+        return True, "OK"
+
+    if mode == "raw-drone":
+        if cnn_raw_decision == "Drone":
+            return True, "OK"
+        return False, "GATED_RAW_NONDRONE"
+
+    if mode == "candidate":
+        if final_decision in {"Drone-like Candidate", "Confirmed Drone"}:
+            return True, "OK"
+        return False, "GATED_NOT_CANDIDATE"
+
+    if mode == "confirmed":
+        if final_decision == "Confirmed Drone":
+            return True, "OK"
+        return False, "GATED_NOT_CONFIRMED"
+
+    return False, "GATED_UNKNOWN_MODE"
+
+
+
+def compute_aoa_features(
+    iq_block: np.ndarray,
+    center_freq_hz: float,
+    antenna_spacing_m: float,
+    calibration_deg: float = 0.0,
+    min_coherence: float = 0.20,
+    phase_offset_rad: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Estimate rough AoA using phase difference between RX0 and RX1.
+
+    Notes:
+    - Requires coherent dual-channel IQ input with shape (2, N) or more.
+    - Angle sign depends on antenna order and physical layout.
+    - calibration_deg should be adjusted using a known 0-degree source.
+    """
+    result = {
+        "aoa_enabled": True,
+        "aoa_status": "UNAVAILABLE",
+        "aoa_deg": math.nan,
+        "aoa_phase_diff_rad": math.nan,
+        "aoa_phase_diff_raw_rad": math.nan,
+        "aoa_phase_offset_rad": float(phase_offset_rad),
+        "aoa_coherence": math.nan,
+        "aoa_antenna_spacing_m": float(antenna_spacing_m),
+        "aoa_calibration_deg": float(calibration_deg),
+    }
+
+    arr = ensure_2d_iq(iq_block)
+    if arr.shape[0] < 2:
+        result["aoa_status"] = "NEED_DUAL_RX"
+        return result
+
+    if center_freq_hz is None or not math.isfinite(float(center_freq_hz)) or float(center_freq_hz) <= 0:
+        result["aoa_status"] = "BAD_CENTER_FREQ"
+        return result
+
+    if antenna_spacing_m <= 0:
+        result["aoa_status"] = "BAD_SPACING"
+        return result
+
+    ch0 = np.asarray(arr[0], dtype=np.complex64).reshape(-1)
+    ch1 = np.asarray(arr[1], dtype=np.complex64).reshape(-1)
+
+    if ch0.size == 0 or ch1.size == 0:
+        result["aoa_status"] = "EMPTY_IQ"
+        return result
+
+    n = min(ch0.size, ch1.size)
+    ch0 = ch0[:n]
+    ch1 = ch1[:n]
+
+    p0 = float(np.mean(np.abs(ch0).astype(np.float64) ** 2))
+    p1 = float(np.mean(np.abs(ch1).astype(np.float64) ** 2))
+    denom = math.sqrt(max(p0 * p1, EPS))
+
+    cross = np.mean(ch1 * np.conj(ch0))
+    phase_diff_raw = float(np.angle(cross))
+    phase_diff = wrap_to_pi(phase_diff_raw - float(phase_offset_rad))
+    coherence = float(np.abs(cross) / denom)
+
+    result["aoa_phase_diff_raw_rad"] = phase_diff_raw
+    result["aoa_phase_diff_rad"] = phase_diff
+    result["aoa_phase_offset_rad"] = float(phase_offset_rad)
+    result["aoa_coherence"] = coherence
+
+    if coherence < min_coherence:
+        result["aoa_status"] = "LOW_COHERENCE"
+        return result
+
+    c = 299_792_458.0
+    wavelength = c / float(center_freq_hz)
+
+    sin_theta = phase_diff * wavelength / (2.0 * math.pi * float(antenna_spacing_m))
+
+    if abs(sin_theta) > 1.0:
+        result["aoa_status"] = "AMBIGUOUS"
+        sin_theta = max(-1.0, min(1.0, sin_theta))
+    else:
+        result["aoa_status"] = "OK"
+
+    aoa_deg = math.degrees(math.asin(sin_theta)) + float(calibration_deg)
+    result["aoa_deg"] = float(aoa_deg)
+    return result
+
 
 
 def prepare_matplotlib(no_display: bool):
@@ -915,7 +1275,10 @@ def update_feature_widget_text(
         f"frame_p99={_fmt_float(row.get('frame_power_p99'))}  "
         f"rms={_fmt_float(row.get('raw_rms'))}  "
         f"SR={_fmt_float(row.get('signal_ratio'), 4)}  "
-        f"clip={_fmt_float(row.get('clip_ratio'), 4)}"
+        f"clip={_fmt_float(row.get('clip_ratio'), 4)}  "
+        f"AoA={_fmt_float(row.get('aoa_deg'), 4)}deg  "
+        f"AoA_sm={_fmt_float(row.get('aoa_deg_smooth'), 4)}deg  "
+        f"Coh={_fmt_float(row.get('aoa_coherence'), 3)}"
     )
 
     status = match_result.get("feature_match_status", "NO_TARGET")
@@ -968,6 +1331,16 @@ def build_side_text(row: dict[str, Any]) -> str:
         f"match_max_err_pct: {row.get('feature_match_max_error_pct', math.nan):.3f}",
         f"match_mean_err_pct: {row.get('feature_match_mean_error_pct', math.nan):.3f}",
         f"match_tol_pct: {row.get('feature_match_tolerance_pct', math.nan):.3f}",
+        "",
+        f"aoa_status: {row.get('aoa_status', 'NA')}",
+        f"aoa_deg: {row.get('aoa_deg', math.nan):.2f}",
+        f"aoa_smooth: {row.get('aoa_deg_smooth', math.nan):.2f}",
+        f"aoa_sm_status: {row.get('aoa_smooth_status', 'NA')}",
+        f"aoa_sm_count: {row.get('aoa_smooth_count', 0)}",
+        f"aoa_phase_rad: {row.get('aoa_phase_diff_rad', math.nan):.3f}",
+        f"aoa_raw_phase: {row.get('aoa_phase_diff_raw_rad', math.nan):.3f}",
+        f"aoa_offset: {row.get('aoa_phase_offset_rad', math.nan):.3f}",
+        f"aoa_coherence: {row.get('aoa_coherence', math.nan):.3f}",
         "",
         f"decision_mode: {row.get('decision_mode', 'none')}",
         f"cnn_prob_drone: {row.get('cnn_prob_drone', math.nan):.4f}",
@@ -1042,6 +1415,11 @@ def main() -> None:
     print(f"threshold_g25/g30  : {args.drone_threshold_g25} / {args.drone_threshold_g30}")
     print(f"temporal_window    : {args.temporal_window}")
     print(f"candidate/confirmed: {args.candidate_vote_k} / {args.confirmed_vote_k}")
+    print(f"enable_aoa         : {args.enable_aoa}")
+    print(f"aoa_spacing_m      : {args.aoa_antenna_spacing_m}")
+    print(f"aoa_calib_deg      : {args.aoa_calibration_deg}")
+    print(f"aoa_phase_offset   : {args.aoa_phase_offset_rad}")
+    print(f"aoa_auto_phase_cal : {args.aoa_auto_phase_calibration}")
     print("note               : YAML is loaded once at startup. Restart to apply changes.")
     print("Press Ctrl+C to stop.")
 
@@ -1069,6 +1447,14 @@ def main() -> None:
 
     receiver = build_receiver(receiver_cfg)
 
+    if args.enable_aoa and args.aoa_auto_phase_calibration:
+        args.aoa_phase_offset_rad = calibrate_aoa_phase_offset(
+            receiver,
+            block_size=int(block_size),
+            calibration_blocks=int(args.aoa_calibration_blocks),
+            min_coherence=float(args.aoa_min_coherence),
+        )
+
     gain_state: dict[str, Any] | None = None
     if not args.no_display:
         gain_state = setup_gain_widgets(
@@ -1080,6 +1466,7 @@ def main() -> None:
         )
 
     update_index = 0
+    aoa_history: list[float] = []
 
     try:
         while args.max_updates is None or update_index < args.max_updates:
@@ -1180,6 +1567,38 @@ def main() -> None:
                 else:
                     final_decision = cnn_raw_decision
 
+            if args.enable_aoa:
+                aoa_ok, aoa_gate_status = should_compute_aoa(
+                    args,
+                    status=status,
+                    raw_features=raw_features,
+                    cnn_raw_decision=cnn_raw_decision,
+                    final_decision=final_decision,
+                )
+
+                if aoa_ok:
+                    aoa_features = compute_aoa_features(
+                        selected_block,
+                        center_freq_hz=float(center_freq),
+                        antenna_spacing_m=float(args.aoa_antenna_spacing_m),
+                        calibration_deg=float(args.aoa_calibration_deg),
+                        min_coherence=float(args.aoa_min_coherence),
+                        phase_offset_rad=float(args.aoa_phase_offset_rad),
+                    )
+                else:
+                    aoa_features = empty_aoa_features(args)
+                    aoa_features["aoa_status"] = aoa_gate_status
+            else:
+                aoa_features = empty_aoa_features(args)
+
+            if args.enable_aoa:
+                aoa_features = update_aoa_smoothing(
+                    aoa_features,
+                    aoa_history,
+                    window=int(args.aoa_smooth_window),
+                    min_valid=int(args.aoa_smooth_min_valid),
+                )
+
             processing_time_sec = time.perf_counter() - loop_start
             latency_sec = processing_time_sec
 
@@ -1216,6 +1635,7 @@ def main() -> None:
                 "final_decision": final_decision,
                 "latency_sec": latency_sec,
                 "processing_time_sec": processing_time_sec,
+                **aoa_features,
             }
 
             if gain_state is not None:
