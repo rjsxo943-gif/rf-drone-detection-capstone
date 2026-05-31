@@ -29,6 +29,11 @@ from src.aoa.coherence import coherence_gate
 from src.aoa.phase_diff import estimate_phase_diff
 from src.aoa.angle_estimator import phase_diff_to_angle
 from src.ui.result_plotter import save_energy_plot
+from src.runtime import (
+    apply_phase_offset_to_iq,
+    print_phase_calibration_state,
+    resolve_phase_offset_to_apply,
+)
 
 
 def main() -> None:
@@ -48,6 +53,33 @@ def main() -> None:
     expected_cnn_shape = (128, 509)
 
     receiver = build_receiver(receiver_cfg)
+
+    phase_calibration_state = None
+    phase_calibration_path = ROOT / "configs" / "calibration" / "current_phase_offset.json"
+    gain_phase_table_path = ROOT / "configs" / "calibration" / "gain_phase_table_2450.json"
+
+    if phase_calibration_path.exists():
+        try:
+            current_gain = receiver_cfg.get("gain", receiver_cfg.get("rx_gain", None))
+
+            if gain_phase_table_path.exists() and current_gain is not None:
+                phase_calibration_state = resolve_phase_offset_to_apply(
+                    current_phase_path=phase_calibration_path,
+                    gain_table_path=gain_phase_table_path,
+                    current_gain=float(current_gain),
+                )
+            else:
+                phase_calibration_state = resolve_phase_offset_to_apply(
+                    current_phase_path=phase_calibration_path,
+                )
+
+            print_phase_calibration_state(phase_calibration_state)
+
+        except Exception as exc:
+            print(f"[WARN] Failed to load phase calibration runtime: {exc}")
+            phase_calibration_state = None
+    else:
+        print(f"[INFO] Phase calibration file not found: {phase_calibration_path}")
 
     gain_estimate = None
     phase_estimate = None
@@ -82,18 +114,26 @@ def main() -> None:
         iq[:, :] = iq.astype(np.complex64, copy=False)
         iq[1] = iq[1] * float(fixed_gain_correction)
 
-        # calibration에서 구한 phase offset 적용
-        iq = remove_phase_offset(
-            iq,
-            phase_offset_rad=fixed_phase_offset_rad,
-            ref_channel=0,
-            target_channel=1,
-        )
+        # phase offset은 robust calibration runtime에서 iq_for_aoa에 적용한다.
+        # 기존 1-block 즉석 phase offset은 멀티패스/잡음에 취약하므로 사용하지 않는다.
 
     iq = normalize_iq(iq)
 
     # 2채널 원본은 STFT/AoA용으로 보관
     iq_for_aoa = iq
+
+    # Robust phase calibration runtime 적용
+    # current_phase_offset.json이 있으면 RX1에 exp(-j * phase_offset)을 적용한다.
+    if (
+        phase_calibration_state is not None
+        and iq_for_aoa.ndim == 2
+        and iq_for_aoa.shape[0] >= 2
+    ):
+        iq_for_aoa = apply_phase_offset_to_iq(
+            iq_for_aoa,
+            phase_offset_rad=phase_calibration_state.phase_offset_to_apply_rad,
+            target_channel=1,
+        )
 
     # baseline energy detector는 현재 ch0만 사용
     if iq.ndim == 2:
@@ -293,6 +333,21 @@ def main() -> None:
         "phase_offset_rad": float(phase_estimate.phase_offset_rad) if phase_estimate is not None else None,
         "phase_offset_deg": float(phase_estimate.phase_offset_deg) if phase_estimate is not None else None,
         "phase_offset_coherence_like": float(phase_estimate.coherence_like) if phase_estimate is not None else None,
+        "runtime_phase_calibration_enabled": phase_calibration_state is not None,
+        "runtime_phase_calibration_source": phase_calibration_state.source if phase_calibration_state is not None else None,
+        "runtime_phase_calibration_quality": phase_calibration_state.quality if phase_calibration_state is not None else None,
+        "runtime_phase_offset_to_apply_rad": (
+            float(phase_calibration_state.phase_offset_to_apply_rad)
+            if phase_calibration_state is not None else None
+        ),
+        "runtime_phase_offset_to_apply_deg": (
+            float(phase_calibration_state.phase_offset_to_apply_deg)
+            if phase_calibration_state is not None else None
+        ),
+        "runtime_phase_uncertainty_deg": (
+            float(phase_calibration_state.uncertainty_deg)
+            if phase_calibration_state is not None else None
+        ),
         "phase_diff_rad": phase_diff_rad,
         "phase_diff_deg": phase_diff_deg,
         "angle_deg": angle_deg,
