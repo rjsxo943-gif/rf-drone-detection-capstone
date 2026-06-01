@@ -9,7 +9,15 @@ import numpy as np
 class OpenCVRenderer:
     """Small OpenCV wrapper for low-latency spectrogram display."""
 
-    def __init__(self, window_name: str = "RF Spectrogram", target_fps: float = 10.0) -> None:
+    def __init__(
+        self,
+        window_name: str = "RF Spectrogram",
+        target_fps: float = 10.0,
+        display_scale: float = 2.0,
+        display_width: int = 0,
+        display_height: int = 0,
+        auto_orient: bool = False,
+    ) -> None:
         try:
             import cv2  # noqa: F401
         except ImportError as exc:
@@ -17,6 +25,10 @@ class OpenCVRenderer:
 
         self.window_name = window_name
         self.target_fps = max(0.1, float(target_fps))
+        self.display_scale = max(0.1, float(display_scale))
+        self.display_width = max(0, int(display_width))
+        self.display_height = max(0, int(display_height))
+        self.auto_orient = bool(auto_orient)
         self._last_render_time = 0.0
 
     def render(self, image: np.ndarray, overlay: Iterable[str] | None = None) -> str | None:
@@ -24,6 +36,7 @@ class OpenCVRenderer:
 
         self._sleep_to_limit_fps()
         frame = self._to_bgr_image(image)
+        frame = self._resize_for_display(frame)
         self._draw_overlay(frame, list(overlay or []))
 
         cv2.imshow(self.window_name, frame)
@@ -69,13 +82,36 @@ class OpenCVRenderer:
         scaled = (arr - min_val) / (max_val - min_val)
         return np.clip(scaled * 255.0, 0, 255).astype(np.uint8)
 
-    @classmethod
-    def _to_bgr_image(cls, image: np.ndarray) -> np.ndarray:
+    def _to_bgr_image(self, image: np.ndarray) -> np.ndarray:
         import cv2
 
-        gray = cls._to_uint8(image)
+        gray = self._to_uint8(image)
+
         gray = np.flipud(gray)
         return cv2.applyColorMap(gray, cv2.COLORMAP_VIRIDIS)
+
+    def _resize_for_display(self, frame: np.ndarray) -> np.ndarray:
+        import cv2
+
+        height, width = frame.shape[:2]
+
+        if self.display_width > 0 and self.display_height > 0:
+            target_size = (self.display_width, self.display_height)
+        elif self.display_width > 0:
+            scale = self.display_width / max(1, width)
+            target_size = (self.display_width, max(1, int(round(height * scale))))
+        elif self.display_height > 0:
+            scale = self.display_height / max(1, height)
+            target_size = (max(1, int(round(width * scale))), self.display_height)
+        else:
+            if abs(self.display_scale - 1.0) < 1e-6:
+                return frame
+            target_size = (
+                max(1, int(round(width * self.display_scale))),
+                max(1, int(round(height * self.display_scale))),
+            )
+
+        return cv2.resize(frame, target_size, interpolation=cv2.INTER_NEAREST)
 
     @staticmethod
     def _draw_overlay(frame: np.ndarray, overlay: list[str]) -> None:

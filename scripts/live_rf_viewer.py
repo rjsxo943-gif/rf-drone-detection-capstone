@@ -40,6 +40,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rx-index", type=int, default=0)
     parser.add_argument("--num-channels", type=int, choices=(1, 2), default=2)
     parser.add_argument("--target-fps", type=float, default=None)
+    parser.add_argument(
+        "--display-scale",
+        type=float,
+        default=2.0,
+        help="Scale factor applied to the displayed spectrogram.",
+    )
+    parser.add_argument(
+        "--display-width",
+        type=int,
+        default=0,
+        help="Optional fixed OpenCV display width in pixels. 0 keeps scale-based sizing.",
+    )
+    parser.add_argument(
+        "--display-height",
+        type=int,
+        default=0,
+        help="Optional fixed OpenCV display height in pixels. 0 keeps scale-based sizing.",
+    )
+    parser.add_argument(
+        "--no-auto-orient",
+        action="store_true",
+        help="Disable automatic landscape orientation for spectrogram display.",
+    )
+    parser.add_argument(
+        "--debug-shape",
+        action="store_true",
+        help="Print raw and display spectrogram shapes.",
+    )
     parser.add_argument("--distance-m", type=float, default=0.0)
     parser.add_argument("--memo", default="")
     parser.add_argument("--profile-blocks", type=int, default=20)
@@ -51,10 +79,16 @@ def parse_args() -> argparse.Namespace:
         "--profile-json",
         default="outputs/viewer/gain_feature_profiles_latest.json",
     )
-    parser.add_argument("--nperseg", type=int, default=512)
-    parser.add_argument("--noverlap", type=int, default=384)
-    parser.add_argument("--nfft", type=int, default=512)
+    parser.add_argument("--nperseg", type=int, default=128)
+    parser.add_argument("--noverlap", type=int, default=96)
+    parser.add_argument("--nfft", type=int, default=128)
     parser.add_argument("--window", default="hann")
+    parser.add_argument(
+        "--display-freq-bins",
+        type=int,
+        default=128,
+        help="Expected frequency-axis bins for display. Default: 128, so display shape is (128, time_bins).",
+    )
     parser.add_argument("--model", default=None, help="CNN model checkpoint path for cnn mode.")
     parser.add_argument("--cnn-backend", choices=("torch", "keras", "dummy"), default="torch")
     parser.add_argument("--cnn-device", default="cpu")
@@ -203,6 +237,40 @@ def select_iq_channel(iq: np.ndarray, rx_index: int) -> np.ndarray:
     return arr[rx_index].astype(np.complex64, copy=False)
 
 
+def ensure_freq_time_spectrogram(
+    spec: np.ndarray,
+    expected_freq_bins: int = 128,
+) -> np.ndarray:
+    """
+    Force spectrogram array layout to (frequency_bins, time_bins).
+
+    Project convention:
+        frequency axis = 128 bins
+        time axis      = 509 bins or similar
+
+    Therefore the display image should have:
+        shape[0] = frequency axis
+        shape[1] = time axis
+    """
+    arr = np.asarray(spec)
+
+    if arr.ndim != 2:
+        return arr
+
+    expected_freq_bins = int(expected_freq_bins)
+
+    # Already correct: (freq, time)
+    if arr.shape[0] == expected_freq_bins:
+        return arr
+
+    # Wrong orientation: (time, freq)
+    if arr.shape[1] == expected_freq_bins:
+        return arr.T
+
+    # Unknown shape. Do not guess.
+    return arr
+
+
 def compute_view_spectrogram(iq_1d: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     stft = compute_stft_branch(
         iq_block=iq_1d,
@@ -212,7 +280,13 @@ def compute_view_spectrogram(iq_1d: np.ndarray, args: argparse.Namespace) -> np.
         nfft=args.nfft,
         window=args.window,
     )
-    return stft.cnn_spectrogram
+    spec = ensure_freq_time_spectrogram(
+        stft.cnn_spectrogram,
+        expected_freq_bins=args.display_freq_bins,
+    )
+    if getattr(args, "debug_shape", False):
+        print("VIEW SPEC SHAPE:", "raw=", stft.cnn_spectrogram.shape, "display=", spec.shape)
+    return spec
 
 
 def build_overlay(
@@ -381,6 +455,10 @@ def run() -> int:
     renderer = OpenCVRenderer(
         window_name=f"RF Viewer - {args.mode}",
         target_fps=args.target_fps,
+        display_scale=args.display_scale,
+        display_width=args.display_width,
+        display_height=args.display_height,
+        auto_orient=False,
     )
 
     last_iq: np.ndarray | None = None
