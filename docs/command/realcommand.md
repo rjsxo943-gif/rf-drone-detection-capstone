@@ -284,3 +284,195 @@ PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
   --temporal-window 5 \
   --candidate-vote-k 2 \
   --confirmed-vote-k 3
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 5 \
+  --center-freq 2437000000 \
+  --distance-m 1.0 \
+  --memo "wifi_ui_test_compact_g5" \
+  --blocks-per-update 5 \
+  --update-interval-sec 1.0
+
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 25 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "hybrid_gain_aware_temporal_test" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3 \
+  --blocks-per-update 5 \
+  --update-interval-sec 0.2
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 25 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "hybrid_gain_aware_temporal_test_overload_peak20" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3 \
+  --blocks-per-update 5 \
+  --update-interval-sec 0.2 \
+  --overload-peak 30 \
+  --overload-clip-ratio 0.001
+
+
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 25 \
+  --center-freq 2450000000 \
+  --distance-m 1 \
+  --memo "" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3 \
+  --blocks-per-update 5 \
+  --update-interval-sec 1.0 \
+  --overload-peak 30 \
+  --overload-clip-ratio 0.001
+
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer.py \
+  --gain 10 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "drone_fixed_gain25_5m" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3 \
+  --blocks-per-update 5 \
+  --update-interval-sec 1.0 \
+  --overload-peak 30 \
+  --overload-clip-ratio 0.001
+
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer_aoa.py \
+  --gain 25 \
+  --center-freq 2450000000 \
+  --distance-m 5.0 \
+  --memo "drone_aoa_test_5m_gain25" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3 \
+  --blocks-per-update 5 \
+  --update-interval-sec 0.2 \
+  --overload-peak 30 \
+  --overload-clip-ratio 0.001 \
+  --enable-aoa \
+  --aoa-antenna-spacing-m 0.061 \
+  --aoa-calibration-deg 0
+
+
+
+MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer_aoa.py \
+  --gain 15 \
+  --center-freq 2450000000 \
+  --distance-m 6.0 \
+  --memo "aoa_phase_cal_front_0deg" \
+  --decision-mode hybrid \
+  --cnn-model outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt \
+  --drone-threshold 0.50 \
+  --drone-threshold-g25 0.35 \
+  --drone-threshold-g30 0.80 \
+  --temporal-window 5 \
+  --candidate-vote-k 2 \
+  --confirmed-vote-k 3 \
+  --blocks-per-update 5 \
+  --update-interval-sec 0.2 \
+  --overload-peak 30 \
+  --overload-clip-ratio 0.001 \
+  --enable-aoa \
+  --aoa-antenna-spacing-m 0.061 \
+  --aoa-calibration-deg 0 \
+  --aoa-min-coherence 0.05 \
+  --aoa-min-signal-ratio 5.0 \
+  --aoa-gate-mode candidate \
+  --aoa-auto-phase-calibration \
+  --aoa-calibration-blocks 30
+
+
+
+
+
+  MPLBACKEND=QtAgg PYTHONPATH=. python scripts/live_siggen_aoa_viewer.py \
+  --gain 20 \
+  --center-freq 2450000000 \
+  --distance-m 1.0 \
+  --memo "siggen_aoa_phase_cal_front_0deg_g15" \
+  --decision-mode none \
+  --blocks-per-update 5 \
+  --update-interval-sec 0.2 \
+  --overload-peak 30 \
+  --overload-clip-ratio 0.001 \
+  --enable-aoa \
+  --aoa-antenna-spacing-m 0.061 \
+  --aoa-auto-phase-calibration \
+  --aoa-calibration-blocks 50 \
+  --aoa-calibration-deg 0 \
+  --aoa-min-coherence 0.05 \
+  --aoa-smooth-window 5 \
+  --aoa-smooth-min-valid 3
+
+
+  PYTHONPATH=. python scripts/calibrate_phase_offset_outdoor.py \
+  --uri ip:192.168.2.1 \
+  --center-freq 2450000000 \
+  --sample-rate 5000000 \
+  --gain 20\
+  --num-blocks 50 \
+  --min-coherence 0.80 \
+  --memo "outdoor_0deg_2m_gain25"
+
+
+
+
+  [필수 1]
+scripts/calibrate_phase_offset_outdoor.py
+→ 단일 현장 기준 gain calibration을 robust 방식으로 변경
+
+[필수 2]
+scripts/build_gain_phase_table.py
+→ 실외 gain별 delta table 제작용 신규 스크립트
+
+[필수 3]
+실시간 AoA 실행 스크립트
+→ live_cnn_spectrogram_viewer.py 또는 AoA 계산하는 스크립트에 get_phase_offset_to_apply() 적용
+
+[권장 4]
+src/calibration/gain_phase_table.py
+→ 공통 모듈로 유지
+
+[권장 5]
+configs/calibration/*.json
+→ current ref offset, gain delta table, session state 분리 저장
+
+[나중 6]
+dashboard/viewer overlay
+→ 현재 보정값과 quality 표시
