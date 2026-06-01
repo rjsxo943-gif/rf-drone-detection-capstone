@@ -35,6 +35,12 @@ from matplotlib.widgets import Button, TextBox
 from scripts.ml.train_rf_binary_cnn import SmallRFBinaryCNN
 
 from src.core import get_project_root, load_all_configs
+from src.ui.gain_feature_profile import (
+    append_gain_profile_csv,
+    format_profile_one_line,
+    save_gain_profiles_json,
+    summarize_feature_rows,
+)
 from src.preprocess import get_cnn_input_iq, normalize_iq, remove_dc_offset
 from src.receiver import build_receiver
 
@@ -615,6 +621,80 @@ def append_csv_log(csv_path: Path, row: dict[str, Any]) -> None:
             writer.writeheader()
         writer.writerow({key: row.get(key, "") for key in CSV_COLUMNS})
 
+
+def update_gain_profile_capture(gain_state: dict[str, Any], row: dict[str, Any]) -> None:
+    """
+    Save Gain Profile 버튼이 눌린 뒤, 다음 N block의 row를 누적하고
+    N개가 모이면 gain별 대표 feature profile을 저장한다.
+
+    순간 1-block 값이 아니라 N-block median 기반 대표값을 저장한다.
+    """
+    if gain_state.get("paused", False):
+        return
+
+    if gain_state.get("profile_capture_requested", False):
+        gain_state["profile_capture_requested"] = False
+        gain_state["profile_capture_active"] = True
+        gain_state["profile_capture_rows"] = []
+
+    if not gain_state.get("profile_capture_active", False):
+        return
+
+    rows = gain_state.setdefault("profile_capture_rows", [])
+    rows.append(dict(row))
+
+    n_target = int(gain_state.get("profile_capture_blocks", 20))
+    n_now = len(rows)
+
+    profile_text = gain_state.get("profile_text")
+    if profile_text is not None:
+        profile_text.set_text(f"Gain profile capturing: {n_now}/{n_target}")
+
+    if n_now < n_target:
+        return
+
+    gain_state["profile_capture_active"] = False
+
+    gain = float(gain_state.get("gain", row.get("gain", math.nan)))
+    distance_m = _parse_optional_float(gain_state.get("distance_m", math.nan))
+    memo = str(gain_state.get("memo", ""))
+
+    profile = summarize_feature_rows(
+        rows,
+        gain=gain,
+        distance_m=distance_m,
+        memo=memo,
+        method="median",
+    )
+
+    gain_key = f"{gain:.1f}"
+    profiles = gain_state.setdefault("gain_profiles", {})
+    profiles[gain_key] = profile
+
+    append_gain_profile_csv(
+        gain_state.get("profile_csv_path", "outputs/viewer/gain_feature_profiles.csv"),
+        profile,
+    )
+
+    save_gain_profiles_json(
+        gain_state.get("profile_json_path", "outputs/viewer/gain_feature_profiles_latest.json"),
+        profiles,
+    )
+
+    message = format_profile_one_line(profile)
+    gain_state["message"] = message
+
+    message_text = gain_state.get("message_text")
+    if message_text is not None:
+        message_text.set_text(message)
+
+    if profile_text is not None:
+        profile_text.set_text(message)
+
+    gain_state["profile_capture_rows"] = []
+
+
+
 def _parse_optional_float(value: Any, default: float = math.nan) -> float:
     try:
         text = str(value).strip()
@@ -657,6 +737,15 @@ def setup_gain_widgets(
         "message": "Gain/feature control ready",
         "paused": False,
         "latest_row": None,
+
+        # Gain feature profile capture
+        "profile_capture_requested": False,
+        "profile_capture_active": False,
+        "profile_capture_blocks": 20,
+        "profile_capture_rows": [],
+        "gain_profiles": {},
+        "profile_csv_path": "outputs/viewer/gain_feature_profiles.csv",
+        "profile_json_path": "outputs/viewer/gain_feature_profiles_latest.json",
     }
 
     fig.subplots_adjust(left=0.08, right=0.70, bottom=0.38, top=0.92)
@@ -688,6 +777,9 @@ def setup_gain_widgets(
         "Target match: NO_TARGET",
         fontsize=7,
     )
+
+    gain_state["message_text"] = message_text
+    gain_state["match_text"] = match_text
 
     # row 1: gain / distance / memo
     gain_ax = fig.add_axes([0.10, 0.290, 0.11, 0.032])
@@ -799,6 +891,61 @@ def setup_gain_widgets(
     gain_state["pause_button"] = pause_button
 
     fig.sca(main_ax)
+
+    # row 3: robust gain feature profile capture
+    profile_button_ax = fig.add_axes([0.10, 0.065, 0.16, 0.032])
+    profile_button = Button(profile_button_ax, "Save Gain Profile")
+
+    profile_blocks_ax = fig.add_axes([0.39, 0.065, 0.08, 0.032])
+    profile_blocks_box = TextBox(
+        profile_blocks_ax,
+        "Blocks",
+        initial=str(gain_state["profile_capture_blocks"]),
+    )
+
+    def on_profile_blocks_submit(text: str) -> None:
+        try:
+            n_blocks = int(float(str(text).strip()))
+        except ValueError:
+            gain_state["message"] = "Invalid profile block count"
+            message_text.set_text(gain_state["message"])
+            fig.canvas.draw_idle()
+            return
+
+        if n_blocks <= 0:
+            gain_state["message"] = "Profile blocks must be > 0"
+            message_text.set_text(gain_state["message"])
+            fig.canvas.draw_idle()
+            return
+
+        gain_state["profile_capture_blocks"] = n_blocks
+        gain_state["message"] = f"Profile blocks set to {n_blocks}"
+        message_text.set_text(gain_state["message"])
+        fig.canvas.draw_idle()
+
+    def on_save_gain_profile(event: Any) -> None:
+        n_blocks = int(gain_state.get("profile_capture_blocks", 20))
+
+        gain_state["profile_capture_requested"] = True
+        gain_state["profile_capture_active"] = False
+        gain_state["profile_capture_rows"] = []
+
+        gain_state["message"] = (
+            f"Gain profile capture requested: "
+            f"gain={gain_state['gain']:.1f}, blocks={n_blocks}"
+        )
+        message_text.set_text(gain_state["message"])
+        match_text.set_text("Gain profile: waiting for next blocks...")
+        fig.canvas.draw_idle()
+
+    profile_blocks_box.on_submit(on_profile_blocks_submit)
+    profile_button.on_clicked(on_save_gain_profile)
+
+    gain_state["profile_button"] = profile_button
+    gain_state["profile_blocks_box"] = profile_blocks_box
+    gain_state["profile_text"] = match_text
+
+
     return gain_state
 
 
@@ -1222,6 +1369,7 @@ def main() -> None:
                 match_result = evaluate_feature_match(row, gain_state)
                 row.update(match_result)
                 update_feature_widget_text(gain_state, row, match_result)
+                update_gain_profile_capture(gain_state, row)
             else:
                 row.update(empty_feature_match_result())
 

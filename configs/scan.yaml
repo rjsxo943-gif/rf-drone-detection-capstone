@@ -6,7 +6,7 @@ scan:
   num_samples: 16384
 
   threshold: 4000000.0
-  scan_blocks: 5
+  scan_blocks: 4
   min_pass_blocks: 2
 
   scan_score_db_threshold: 76.0

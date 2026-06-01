@@ -74,7 +74,7 @@ sdr:
   block_size: 16384
 
   # SDR 설정 직후 버릴 버퍼 수
-  warmup_reads: 5
+  warmup_reads: 4
 
   # 중심 주파수 변경 직후 버릴 버퍼 수
-  retune_warmup_reads: 3
+  retune_warmup_reads: 4
