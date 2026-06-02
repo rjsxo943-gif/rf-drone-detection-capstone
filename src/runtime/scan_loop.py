@@ -47,7 +47,6 @@ class ScanRuntime:
 
     def close(self) -> None:
         close_fn = getattr(self.receiver, "close", None)
-
         if callable(close_fn):
             close_fn()
 
@@ -55,7 +54,6 @@ class ScanRuntime:
 def _unwrap_scan_cfg(scan_cfg_raw: dict[str, Any]) -> dict[str, Any]:
     if "scan" in scan_cfg_raw and isinstance(scan_cfg_raw["scan"], dict):
         return scan_cfg_raw["scan"]
-
     return scan_cfg_raw
 
 
@@ -82,6 +80,12 @@ def _get_receiver_gain(receiver: Any, receiver_cfg: dict[str, Any]) -> float | N
     return None
 
 
+def _receiver_sample_rate(receiver_cfg: dict[str, Any]) -> float:
+    if isinstance(receiver_cfg.get("sdr"), dict) and "sample_rate" in receiver_cfg["sdr"]:
+        return float(receiver_cfg["sdr"]["sample_rate"])
+    return float(receiver_cfg["sample_rate"])
+
+
 def setup_scan_runtime(
     *,
     config_dir: str | Path = PROJECT_ROOT / "configs",
@@ -91,14 +95,18 @@ def setup_scan_runtime(
 
     원칙:
     - CNN model path / class_names / threshold / temporal voting은 configs/ml.yaml에서만 읽는다.
-    - runtime code 내부 hardcoded model path를 사용하지 않는다.
+    - AoA geometry / coherence / smoothing / sector는 configs/aoa.yaml에서만 읽는다.
+    - runtime code 내부 hardcoded model path / AoA threshold 사용을 금지한다.
     """
     cfg = load_all_configs(config_dir)
 
     receiver_cfg = cfg["receiver"]
     paths_cfg = cfg["paths"]
     ml_cfg = cfg["ml"]
+    aoa_cfg = cfg.get("aoa", {}) or {}
     stft_cfg = ml_cfg.get("stft", {})
+    coherence_cfg = aoa_cfg.get("coherence", {}) or {}
+    smoothing_cfg = aoa_cfg.get("smoothing", {}) or {}
 
     scan_cfg = _unwrap_scan_cfg(cfg["scan"])
 
@@ -165,7 +173,7 @@ def setup_scan_runtime(
         print("==========================")
         print()
 
-    phase_offset_rad = 0.0
+    phase_offset_rad = float(aoa_cfg.get("phase_offset_rad", 0.0))
 
     try:
         calib = load_calibration_params(
@@ -181,17 +189,31 @@ def setup_scan_runtime(
 
     except Exception as e:
         print(f"[AoA CAL WARN] failed to load phase calibration: {e}")
-        print("[AoA CAL WARN] use phase_offset_rad=0.0")
+        print(f"[AoA CAL WARN] use aoa.yaml phase_offset_rad={phase_offset_rad:.10f}")
+
+    print("=== AOA RUNTIME CONFIG ===")
+    print(f"ref/target     : {aoa_cfg.get('ref_channel', 0)} -> {aoa_cfg.get('target_channel', 1)}")
+    print(f"spacing_m      : {aoa_cfg.get('antenna_spacing_m', 0.06)}")
+    print(f"phase_offset   : {phase_offset_rad:.10f} rad")
+    print(f"coherence_thr  : {coherence_cfg.get('threshold', 0.6)}")
+    print(f"energy_pct     : {coherence_cfg.get('energy_percentile', 75.0)}")
+    print(f"smoothing      : enabled={smoothing_cfg.get('enabled', False)}, "
+          f"method={smoothing_cfg.get('method', 'median')}, "
+          f"window={smoothing_cfg.get('window_size', 5)}, "
+          f"min={smoothing_cfg.get('min_valid_samples', 1)}")
+    print("==========================")
+    print()
 
     analyzer = PrecisionAnalyzer(
         receiver=receiver,
         num_samples=num_samples,
-        sample_rate=receiver_cfg["sample_rate"],
-        antenna_spacing_m=cfg["aoa"]["antenna_spacing_m"],
+        sample_rate=_receiver_sample_rate(receiver_cfg),
+        antenna_spacing_m=float(aoa_cfg.get("antenna_spacing_m", 0.06)),
         nperseg=int(stft_cfg.get("nperseg", 128)),
         noverlap=int(stft_cfg.get("noverlap", 96)),
         nfft=int(stft_cfg.get("nfft", 128)),
-        coherence_threshold=float(scan_cfg.get("coherence_threshold", 0.001)),
+        window=str(stft_cfg.get("window", "hann")),
+        coherence_threshold=float(coherence_cfg.get("threshold", 0.6)),
         phase_offset_rad=phase_offset_rad,
         settle_sec=float(scan_cfg.get("settle_sec", 0.0)),
         precision_blocks=int(scan_cfg.get("precision_blocks_per_candidate", 1)),
@@ -201,6 +223,7 @@ def setup_scan_runtime(
         cnn_classifier=cnn_classifier,
         decision_cfg=decision_cfg,
         current_gain=current_gain,
+        aoa_cfg=aoa_cfg,
     )
 
     return ScanRuntime(
@@ -230,13 +253,6 @@ def run_one_scan_cycle(
     cycle_index: int = 1,
     verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    """
-    scan 1 cycle을 수행한다.
-
-    핵심:
-    - scanner/analyzer/receiver는 새로 만들지 않는다.
-    - 이미 만들어진 runtime 객체를 재사용한다.
-    """
     events = runtime.scanner.scan_once()
     event_dicts: list[dict[str, Any]] = []
 
@@ -278,6 +294,8 @@ def run_one_scan_cycle(
                 f"final={result.final_decision} | "
                 f"coherence={result.coherence} | "
                 f"angle={result.angle_deg} deg | "
+                f"smooth={result.aoa_smoothed_angle_deg} deg "
+                f"smooth_valid={result.aoa_smoothing_valid} | "
                 f"sector={result.sector_index}({result.sector_label}) | "
                 f"sel_block={result.selected_block_index}/{result.precision_blocks} | "
                 f"spectrogram_path={result.spectrogram_path}"
@@ -309,15 +327,6 @@ def save_scan_events(
     runtime: ScanRuntime,
     cycle_index: int,
 ) -> Path:
-    """
-    scan 결과 저장.
-
-    scan_events.json:
-    - 항상 최신 cycle 결과로 덮어씀
-
-    scan_events_cycle_XXXXXX.json:
-    - cycle별 결과도 따로 저장
-    """
     latest_path = runtime.run_dir / "scan_events.json"
 
     with latest_path.open("w", encoding="utf-8") as f:
@@ -332,12 +341,6 @@ def save_scan_events(
 
 
 def _read_stop_key_if_available(stop_key: str) -> bool:
-    """
-    stdin에 입력이 들어와 있으면 읽고,
-    stop_key와 같으면 True를 반환한다.
-
-    WSL/Linux 터미널 기준.
-    """
     readable, _, _ = select.select([sys.stdin], [], [], 0.0)
 
     if not readable:
@@ -361,14 +364,6 @@ def run_continuous_scan_loop(
     cycle_delay_sec: float = 0.0,
     verbose: bool = True,
 ) -> int:
-    """
-    연속 scan loop.
-
-    핵심:
-    - receiver/scanner/analyzer를 한 번만 생성한다.
-    - scanner.scan_once()만 반복한다.
-    - cycle 사이에 q 입력을 확인한다.
-    """
     runtime = setup_scan_runtime(config_dir=config_dir)
 
     cycle_index = 0
