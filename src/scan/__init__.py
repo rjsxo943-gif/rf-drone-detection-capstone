@@ -10,11 +10,6 @@ from src.scan.scanner import (
     compute_fft_scan_score,
 )
 
-from src.scan.precision_analyzer import (
-    PrecisionAnalyzer,
-    PrecisionAnalysisResult,
-)
-
 __all__ = [
     "build_scan_freqs",
     "is_energy_passed",
@@ -22,6 +17,4 @@ __all__ = [
     "ScanEvent",
     "FrequencyScanner",
     "compute_fft_scan_score",
-    "PrecisionAnalyzer",
-    "PrecisionAnalysisResult"
 ]

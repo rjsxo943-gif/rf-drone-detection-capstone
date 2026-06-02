@@ -401,3 +401,150 @@ def build_cnn_classifier(ml_cfg: dict[str, Any]):
         f"Unsupported CNN inference backend: {backend}. "
         "Expected 'dummy', 'keras', 'torch', or 'rf4'." 
     )
+class BinaryFlatCNNClassifier:
+    """
+    rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt 전용 binary CNN loader.
+
+    구조:
+    Conv-BN-ReLU-MaxPool x3
+    Conv-BN-ReLU
+    AdaptiveAvgPool2d((1, 1))
+    Flatten
+    Dropout(0.30)
+    Linear(128, 2)
+
+    class_names:
+    0 = NotDrone
+    1 = Drone
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        class_names: list[str] | None = None,
+        device: str = "cpu",
+    ) -> None:
+        self.model_path = str(model_path)
+        self.device_name = str(device)
+        self.mean = 0.0
+        self.std = 1.0
+
+        try:
+            import torch
+            import torch.nn as nn
+        except ImportError as exc:
+            raise ImportError("PyTorch is required for BinaryFlatCNNClassifier.") from exc
+
+        self.torch = torch
+        self.nn = nn
+        self.device = torch.device(device)
+
+        from pathlib import Path
+        path = Path(model_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Binary CNN checkpoint not found: {path}")
+
+        checkpoint = torch.load(path, map_location=self.device)
+        if not isinstance(checkpoint, dict):
+            raise ValueError(f"Expected checkpoint dict, got {type(checkpoint)}")
+
+        self.checkpoint = checkpoint
+        self.class_names = list(checkpoint.get("class_names", class_names or ["NotDrone", "Drone"]))
+        self.num_classes = int(checkpoint.get("num_classes", len(self.class_names)))
+
+        if len(self.class_names) != self.num_classes:
+            raise ValueError(
+                f"class_names length mismatch: len={len(self.class_names)}, "
+                f"num_classes={self.num_classes}"
+            )
+
+        if "mean" in checkpoint:
+            self.mean = float(checkpoint["mean"])
+        if "std" in checkpoint:
+            self.std = float(checkpoint["std"])
+
+        self.model = self._build_model(num_classes=self.num_classes)
+        self.model.to(self.device)
+
+        state_dict = checkpoint.get("model_state_dict", checkpoint.get("state_dict"))
+        if state_dict is None:
+            raise ValueError("Checkpoint missing model_state_dict/state_dict")
+
+        self.model.load_state_dict(state_dict)
+        self.model.eval()
+
+    def _build_model(self, num_classes: int):
+        nn = self.nn
+
+        class BinaryCNN(nn.Module):
+            def __init__(self, num_classes: int = 2) -> None:
+                super().__init__()
+
+                self.features = nn.Sequential(
+                    nn.Conv2d(1, 16, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(16),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(2),
+
+                    nn.Conv2d(16, 32, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(32),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(2),
+
+                    nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(64),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(2),
+
+                    nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(128),
+                    nn.ReLU(inplace=True),
+
+                    nn.AdaptiveAvgPool2d((1, 1)),
+                )
+
+                self.classifier = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Dropout(0.30),
+                    nn.Linear(128, num_classes),
+                )
+
+            def forward(self, x):
+                x = self.features(x)
+                logits = self.classifier(x)
+                return logits
+
+        return BinaryCNN(num_classes=num_classes)
+
+    def predict(self, spectrogram):
+        import numpy as np
+
+        x = np.asarray(spectrogram, dtype=np.float32)
+
+        if x.ndim == 3 and x.shape[-1] == 1:
+            x = x[..., 0]
+
+        if x.ndim != 2:
+            raise ValueError(f"Expected spectrogram shape (H, W), got {x.shape}")
+
+        x = (x - self.mean) / max(self.std, 1e-8)
+
+        x_tensor = self.torch.from_numpy(x).float()
+        x_tensor = x_tensor.unsqueeze(0).unsqueeze(0)
+        x_tensor = x_tensor.to(self.device)
+
+        with self.torch.no_grad():
+            logits = self.model(x_tensor)
+            probs = self.torch.softmax(logits, dim=1)
+
+        pred = probs.squeeze(0).cpu().numpy().astype(np.float32)
+        class_index = int(np.argmax(pred))
+        confidence = float(pred[class_index])
+        class_name = self.class_names[class_index]
+
+        return CNNResult(
+            class_name=class_name,
+            class_index=class_index,
+            confidence=confidence,
+            probabilities=pred.tolist(),
+        )

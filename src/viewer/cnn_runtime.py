@@ -8,7 +8,7 @@ from typing import Any, Iterable
 import numpy as np
 
 from src.features.spectrogram import compute_stft_branch
-from src.ml.inference import DummyCNNClassifier, KerasCNNClassifier, TorchCNNClassifier
+from src.ml.inference import DummyCNNClassifier, KerasCNNClassifier, TorchCNNClassifier, BinaryFlatCNNClassifier
 
 
 DEFAULT_CLASS_NAMES = ("Background", "WiFi", "Bluetooth", "Drone-like")
@@ -117,6 +117,14 @@ class CNNRuntime:
                 dummy_class_name=str(self.dummy_class_name),
                 dummy_confidence=float(self.dummy_confidence),
             )
+        if backend == "binary":
+            if self.model_path in (None, "", "None", "null"):
+                raise ValueError("CNN binary backend requires --model PATH. Use --cnn-backend dummy for dry-run.")
+            return BinaryFlatCNNClassifier(
+                model_path=str(self.model_path),
+                class_names=list(self.class_names),
+                device=str(self.device),
+            )
         if backend == "torch":
             if self.model_path in (None, "", "None", "null"):
                 raise ValueError("CNN torch backend requires --model PATH. Use --cnn-backend dummy for dry-run.")
@@ -132,7 +140,7 @@ class CNNRuntime:
                 model_path=str(self.model_path),
                 class_names=list(self.class_names),
             )
-        raise ValueError(f"Unsupported CNN backend={self.backend}. Use torch, keras, or dummy.")
+        raise ValueError(f"Unsupported CNN backend={self.backend}. Use binary, torch, keras, or dummy.")
 
     def _select_iq_channel(self, iq: np.ndarray) -> np.ndarray:
         arr = np.asarray(iq)

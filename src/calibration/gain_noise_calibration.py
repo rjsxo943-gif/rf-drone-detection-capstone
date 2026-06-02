@@ -231,7 +231,7 @@ def calibrate_noise_by_gain(
 
         safety = summarize_blocks_safety(
             blocks,
-            full_scale=1.0,
+            full_scale=2048.0,
         )
 
         profile = GainNoiseCalibrationResult(

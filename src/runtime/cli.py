@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from src.runtime.cnn_capture_actions import run_cnn_capture_action
 from src.runtime.scan_actions import run_scan_action
 from src.runtime.rf4_actions import run_rf4_single_block_action
-from src.calibration import load_calibration_params
+from src.calibration import (
+    load_gain_noise_calibration,
+    load_phase_gain_by_gain_calibration,
+)
 from src.runtime.scan_loop import run_continuous_scan_loop
 from src.runtime.calibration_actions import (
-    DEFAULT_NOISE_OUTPUT,
-    DEFAULT_PHASE_GAIN_OUTPUT,
-    run_noise_calibration_action,
-    run_phase_gain_calibration_action,
+    DEFAULT_GAIN_LIST,
+    DEFAULT_GAIN_NOISE_OUTPUT,
+    DEFAULT_GAIN_PHASE_GAIN_OUTPUT,
+    run_gain_wise_noise_calibration_action,
+    run_gain_wise_phase_gain_calibration_action,
 )
 
 
@@ -20,57 +25,88 @@ def _format_exists(path: Path) -> str:
     return "있음" if path.exists() else "없음"
 
 
+def _parse_gain_list_text(text: str, default: tuple[float, ...] = DEFAULT_GAIN_LIST) -> list[float]:
+    value = text.strip()
+    if not value:
+        return [float(x) for x in default]
+
+    # accepts: 20,25,30 or 20 25 30
+    tokens = [x for x in re.split(r"[,\s]+", value) if x]
+    gains = sorted(dict.fromkeys(float(x) for x in tokens))
+    if not gains:
+        raise ValueError("gain list must not be empty")
+    return gains
+
+
+def _ask_gain_list() -> list[float]:
+    default_text = ",".join(f"{x:g}" for x in DEFAULT_GAIN_LIST)
+    text = input(f"gain list [default={default_text}] > ").strip()
+    return _parse_gain_list_text(text)
+
+
+def _ask_int(prompt: str, default: int) -> int:
+    text = input(f"{prompt} [default={default}] > ").strip()
+    return int(text) if text else int(default)
+
+
 def print_calibration_status() -> None:
-    noise_path = Path(DEFAULT_NOISE_OUTPUT)
-    phase_gain_path = Path(DEFAULT_PHASE_GAIN_OUTPUT)
+    noise_path = Path(DEFAULT_GAIN_NOISE_OUTPUT)
+    phase_gain_path = Path(DEFAULT_GAIN_PHASE_GAIN_OUTPUT)
 
     print()
-    print("=== Calibration Status ===")
-    print(f"noise calibration      : {_format_exists(noise_path)}")
-    print(f"phase/gain calibration : {_format_exists(phase_gain_path)}")
+    print("=== Gain-wise Calibration Status ===")
+    print(f"noise_by_gain profile      : {_format_exists(noise_path)}")
+    print(f"phase_gain_by_gain profile : {_format_exists(phase_gain_path)}")
 
-    try:
-        calib = load_calibration_params(
-            noise_path=noise_path,
-            phase_gain_path=phase_gain_path,
-            require_noise=False,
-            require_phase_gain=False,
-        )
-
-        if calib.noise is not None:
+    if noise_path.exists():
+        try:
+            noise_set = load_gain_noise_calibration(noise_path)
             print()
-            print("[Noise]")
-            print(f"noise_floor : {calib.noise.noise_floor:.10g}")
-            print(f"threshold   : {calib.noise.threshold:.10g}")
-            print(f"method      : {calib.noise.detector_method}")
-            print(f"source      : {calib.noise.source_path}")
+            print("[Gain-wise Noise]")
+            print(f"source     : {noise_path}")
+            print(f"gain_list  : {noise_set.gain_list}")
+            print(f"blocks/gain: {noise_set.num_blocks_per_gain}")
+            for gain_key, profile in sorted(noise_set.profiles.items(), key=lambda item: float(item[0])):
+                safety = profile.get("safety", {})
+                print(
+                    f"  gain={float(gain_key):g} "
+                    f"thr={float(profile.get('threshold', float('nan'))):.10g} "
+                    f"safety={safety.get('status', 'UNKNOWN')} "
+                    f"sat_max={float(safety.get('saturation_ratio_max', 0.0)) * 100:.3f}%"
+                )
+        except Exception as e:
+            print(f"[WARN] gain-wise noise status load failed: {e}")
 
-        if calib.phase_gain is not None:
+    if phase_gain_path.exists():
+        try:
+            pg_set = load_phase_gain_by_gain_calibration(phase_gain_path)
             print()
-            print("[Phase/Gain]")
-            print(f"gain_correction : {calib.phase_gain.gain_correction:.10g}")
-            print(f"phase_offset    : {calib.phase_gain.phase_offset_rad:.10g} rad")
-            print(f"phase_offset    : {calib.phase_gain.phase_offset_deg:.6f} deg")
-            print(f"coherence_like  : {calib.phase_gain.coherence_like:.10g}")
-            print(f"source          : {calib.phase_gain.source_path}")
-
-    except Exception as e:
-        print(f"[WARN] calibration status load failed: {e}")
+            print("[Gain-wise Phase/Gain]")
+            print(f"source     : {phase_gain_path}")
+            print(f"gain_list  : {pg_set.gain_list}")
+            print(f"blocks/gain: {pg_set.num_blocks_per_gain}")
+            for gain_key, profile in sorted(pg_set.profiles.items(), key=lambda item: float(item[0])):
+                print(
+                    f"  gain={float(gain_key):g} "
+                    f"corr={float(profile.get('gain_correction_mean', float('nan'))):.6g} "
+                    f"phase={float(profile.get('phase_offset_deg_mean', float('nan'))):.3f}deg "
+                    f"coh={float(profile.get('coherence_like_mean', float('nan'))):.6g}"
+                )
+        except Exception as e:
+            print(f"[WARN] gain-wise phase/gain status load failed: {e}")
 
     print()
-
 
 def print_menu() -> None:
     print()
     print("=== RF Drone Detection Runtime CLI ===")
-    print("[c] calibration status")
-    print("[n] noise calibration")
-    print("[p] phase/gain calibration")
+    print("[c] gain-wise calibration status")
+    print("[n] gain-wise noise calibration")
+    print("[p] gain-wise phase/gain calibration")
     print("[s] start")
     print("[r] RF4 single block inference")
     print("[a] AoA sector scan")
     print("[q] quit")
-
 
 def run_cli() -> None:
     print_calibration_status()
@@ -94,15 +130,25 @@ def run_cli() -> None:
 
         elif cmd == "n":
             print()
-            print("=== Run Noise Calibration ===")
-            print("주의: 의도적인 신호원을 끄고 진행하는 것이 좋다.")
-            run_noise_calibration_action()
+            print("=== Run Gain-wise Noise Calibration ===")
+            print("주의: 드론/조종기/와이파이 신호원을 최대한 끄고 배경 noise만 받는 상태에서 진행한다.")
+            gain_list = _ask_gain_list()
+            num_blocks = _ask_int("num_blocks_per_gain", 50)
+            run_gain_wise_noise_calibration_action(
+                gain_list=gain_list,
+                num_blocks_per_gain=num_blocks,
+            )
 
         elif cmd == "p":
             print()
-            print("=== Run Phase/Gain Calibration ===")
-            print("주의: 신호원을 두 안테나의 정면 0도 방향에 두고 진행하는 것이 기준이다.")
-            run_phase_gain_calibration_action()
+            print("=== Run Gain-wise Phase/Gain Calibration ===")
+            print("주의: 기준 신호원을 두 안테나 정면 0도 방향에 두고 진행한다.")
+            gain_list = _ask_gain_list()
+            num_blocks = _ask_int("num_blocks_per_gain", 50)
+            run_gain_wise_phase_gain_calibration_action(
+                gain_list=gain_list,
+                num_blocks_per_gain=num_blocks,
+            )
 
         elif cmd == "a":
             print()
@@ -169,7 +215,7 @@ def run_cli() -> None:
 
             except FileNotFoundError as e:
                 print(f"[ERROR] {e}")
-                print("먼저 [n] noise calibration을 실행해야 한다.")
+                print("먼저 [n] gain-wise noise calibration을 실행해야 한다.")
 
             except Exception as e:
                 print(f"[ERROR] cnn capture action failed: {e}")
@@ -234,3 +280,5 @@ def run_cli() -> None:
 
         else:
             print(f"unknown command: {cmd}")
+if __name__ == "__main__":
+    run_cli()

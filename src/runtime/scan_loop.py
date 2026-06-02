@@ -13,7 +13,8 @@ from src.calibration import load_calibration_params
 from src.runtime.calibration_actions import DEFAULT_NOISE_OUTPUT, DEFAULT_PHASE_GAIN_OUTPUT
 from src.ml.inference import build_cnn_classifier
 from src.receiver.factory import build_receiver
-from src.scan import FrequencyScanner, PrecisionAnalyzer
+from src.scan import FrequencyScanner
+from src.scan.precision_analyzer import PrecisionAnalyzer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

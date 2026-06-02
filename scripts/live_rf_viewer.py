@@ -60,6 +60,18 @@ def parse_args() -> argparse.Namespace:
         help="Optional fixed OpenCV display height in pixels. 0 keeps scale-based sizing.",
     )
     parser.add_argument(
+        "--overlay-mode",
+        choices=("right", "image"),
+        default="right",
+        help="Overlay layout. 'right' puts text in a side panel; 'image' draws text on spectrogram.",
+    )
+    parser.add_argument(
+        "--overlay-panel-width",
+        type=int,
+        default=520,
+        help="Width of right-side status panel in pixels.",
+    )
+    parser.add_argument(
         "--no-auto-orient",
         action="store_true",
         help="Disable automatic landscape orientation for spectrogram display.",
@@ -91,7 +103,7 @@ def parse_args() -> argparse.Namespace:
         help="Expected frequency-axis bins for display. Default: 128, so display shape is (128, time_bins).",
     )
     parser.add_argument("--model", default=None, help="CNN model checkpoint path for cnn mode.")
-    parser.add_argument("--cnn-backend", choices=("torch", "keras", "dummy"), default="torch")
+    parser.add_argument("--cnn-backend", choices=("binary", "torch", "keras", "dummy"), default="torch")
     parser.add_argument("--cnn-device", default="cpu")
     parser.add_argument(
         "--class-names",
@@ -339,10 +351,62 @@ def format_calibration_status(
 
     return " | ".join(parts)
 
+
+def _fmt_profile_value(value: Any, digits: int = 3) -> str:
+    try:
+        if value is None or value == "":
+            return "n/a"
+        return f"{float(value):.{digits}g}"
+    except Exception:
+        return str(value)
+
+
+def format_profile_summary_lines(
+    profile_summaries: list[dict[str, Any]] | None,
+    max_rows: int = 8,
+) -> list[str]:
+    """
+    OpenCV 오른쪽 패널에 표시할 gain별 profile 대표 피쳐값을 만든다.
+
+    대표값 기준:
+    - raw_abs_p99_median      : gain별 대표 수신 세기
+    - raw_rms_median          : 전체 에너지 대표값
+    - frame_power_p99_median  : spectrogram/CNN 입력 쪽 세기 대표값
+    - raw_abs_max_max         : 포화/이상치 확인용
+    """
+    if not profile_summaries:
+        return []
+
+    rows = list(profile_summaries)[-int(max_rows):]
+
+    lines: list[str] = []
+    lines.append("PROFILE SUMMARY median")
+    lines.append("gain | dist | raw_p99 | rms | frame_p99 | max")
+
+    for item in rows:
+        gain = _fmt_profile_value(item.get("gain"), digits=4)
+        dist = _fmt_profile_value(item.get("distance_m"), digits=3)
+        raw_p99 = _fmt_profile_value(item.get("raw_abs_p99_median"), digits=4)
+        rms = _fmt_profile_value(item.get("raw_rms_median"), digits=4)
+        frame_p99 = _fmt_profile_value(item.get("frame_power_p99_median"), digits=4)
+        raw_max = _fmt_profile_value(item.get("raw_abs_max_max"), digits=4)
+
+        lines.append(
+            f"G{gain} D{dist} p99={raw_p99} rms={rms} fp99={frame_p99} max={raw_max}"
+        )
+
+    latest = rows[-1]
+    memo = str(latest.get("memo", "")).strip()
+    if memo:
+        lines.append(f"latest memo={memo}")
+
+    return lines
+
 def build_overlay(
     state: ViewerState,
     raw: dict[str, Any],
     profile_status: str | None = None,
+    profile_summaries: list[dict[str, Any]] | None = None,
     aoa_result: dict[str, Any] | None = None,
     cnn_result: dict[str, Any] | None = None,
     log_status: str | None = None,
@@ -361,6 +425,8 @@ def build_overlay(
         lines.append(f"memo={state.memo}")
     if profile_status:
         lines.append(profile_status)
+    if profile_summaries:
+        lines.extend(format_profile_summary_lines(profile_summaries))
     if log_status:
         lines.append(log_status)
     if calibration_status:
@@ -544,7 +610,7 @@ def run() -> int:
             noise_profile_path=args.noise_profile,
             phase_gain_profile_path=args.phase_gain_profile,
             allow_nearest=True,
-            full_scale=1.0,
+            full_scale=2048.0,
         )
 
     renderer = OpenCVRenderer(
@@ -554,9 +620,12 @@ def run() -> int:
         display_width=args.display_width,
         display_height=args.display_height,
         auto_orient=False,
+        overlay_mode=args.overlay_mode,
+        overlay_width=args.overlay_panel_width,
     )
 
     last_iq: np.ndarray | None = None
+    recent_profile_summaries: list[dict[str, Any]] = []
     receiver = build_receiver(args)
     try:
         while state.running:
@@ -608,6 +677,8 @@ def run() -> int:
                 )
                 profile_status = profile.status_text()
                 if summary is not None:
+                    recent_profile_summaries.append(summary)
+                    del recent_profile_summaries[:-8]
                     profile_status = f"PROFILE saved {summary.get('captured_blocks')} blocks"
 
             aoa_result = None
@@ -633,13 +704,14 @@ def run() -> int:
                 )
 
             overlay = build_overlay(
-                state,
-                raw,
-                profile_status,
-                aoa_result,
-                cnn_result,
-                log_status,
-                calibration_status,
+                state=state,
+                raw=raw,
+                profile_status=profile_status,
+                profile_summaries=recent_profile_summaries,
+                aoa_result=aoa_result,
+                cnn_result=cnn_result,
+                log_status=log_status,
+                calibration_status=calibration_status,
             )
             key = renderer.render(image, overlay)
             handle_key(key, state, receiver, profile, aoa_runtime, cnn_runtime, args)
