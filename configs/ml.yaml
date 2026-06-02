@@ -4,6 +4,7 @@
 #
 # 원칙:
 # - 모델 경로, 클래스 이름, Drone 판단 임계값, temporal voting 조건은 여기서만 관리한다.
+# - raw safety / overload 판단 기준도 여기서만 관리한다.
 # - viewer / CLI / runtime 코드는 이 YAML 값을 읽어서 사용한다.
 # - 코드 내부 hardcoded model path / class_names / threshold 사용을 금지한다.
 #
@@ -65,6 +66,37 @@ spectrogram:
   use_log_scale: true
   normalize: true
   normalize_method: minmax
+
+# ============================================================
+# Raw safety / viewer status policy
+# ============================================================
+# 중요:
+# - receiver raw IQ는 현재 [-1, 1] 정규화 스케일이 아니다.
+# - 따라서 overload_peak=0.95 같은 정규화 기준을 쓰면 대부분 가짜 OVERLOAD가 된다.
+# - raw safety 판단은 여기 YAML 기준만 사용한다.
+# - 실제 ADC saturation 기준이 확인되면 raw_peak_overload를 그 값에 맞춰 조정한다.
+
+raw_safety:
+  enabled: true
+  scale_mode: raw_adc_like
+
+  # signal_ratio = frame_power_p99 / frame_power_median
+  no_signal_ratio: 2.0
+  valid_signal_ratio: 5.0
+
+  overload:
+    enabled: true
+
+    # raw_peak가 이 값 이상이면 OVERLOAD로 판단한다.
+    # 기존 0.95는 normalized IQ 기준이라 현재 raw scale과 맞지 않는다.
+    raw_peak_overload: 30000.0
+
+    # abs(raw) >= raw_peak_overload 인 샘플 비율이 이 값 이상이면 OVERLOAD.
+    clip_ratio_overload: 0.001
+
+    # true이면 OVERLOAD block은 CNN 판정에서 제외할 수 있다.
+    # 현재는 false로 두어 로그 확인을 우선한다.
+    skip_cnn_on_overload: false
 
 # ============================================================
 # Model
