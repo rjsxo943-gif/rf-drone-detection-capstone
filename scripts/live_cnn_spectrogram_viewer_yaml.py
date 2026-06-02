@@ -4,6 +4,7 @@ YAML-driven Live CNN Spectrogram Viewer.
 
 Purpose:
 - Keep model path / class names / thresholds / temporal voting in configs/ml.yaml only.
+- Keep raw safety / overload thresholds in configs/ml.yaml only.
 - Reuse the existing live_cnn_spectrogram_viewer helper functions.
 - Avoid command-line hardcoded model paths and threshold defaults.
 
@@ -14,13 +15,11 @@ Run:
 from __future__ import annotations
 
 import argparse
-import csv
 import math
 import time
 from collections import deque
 from dataclasses import asdict
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -84,10 +83,12 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--frame-size", type=int, default=1024)
     parser.add_argument("--hop-size", type=int, default=512)
-    parser.add_argument("--no-signal-ratio", type=float, default=2.0)
-    parser.add_argument("--valid-signal-ratio", type=float, default=5.0)
-    parser.add_argument("--overload-peak", type=float, default=0.95)
-    parser.add_argument("--overload-clip-ratio", type=float, default=0.001)
+
+    # These can still be overridden for emergency debugging, but their defaults are YAML.
+    parser.add_argument("--no-signal-ratio", type=float, default=None)
+    parser.add_argument("--valid-signal-ratio", type=float, default=None)
+    parser.add_argument("--overload-peak", type=float, default=None)
+    parser.add_argument("--overload-clip-ratio", type=float, default=None)
 
     parser.add_argument("--stft-nperseg", type=int, default=None)
     parser.add_argument("--stft-noverlap", type=int, default=None)
@@ -121,6 +122,46 @@ def _ensure_csv_columns(row: dict[str, Any]) -> dict[str, Any]:
     return {key: row.get(key, "") for key in CSV_COLUMNS}
 
 
+def _raw_safety_cfg(ml_cfg: dict[str, Any]) -> dict[str, Any]:
+    return ml_cfg.get("raw_safety", {}) or {}
+
+
+def _build_viewer_thresholds_from_yaml(
+    ml_cfg: dict[str, Any],
+    args: argparse.Namespace,
+) -> ViewerThresholds:
+    safety = _raw_safety_cfg(ml_cfg)
+    overload = safety.get("overload", {}) or {}
+
+    no_signal_ratio = float(
+        args.no_signal_ratio
+        if args.no_signal_ratio is not None
+        else safety.get("no_signal_ratio", 2.0)
+    )
+    valid_signal_ratio = float(
+        args.valid_signal_ratio
+        if args.valid_signal_ratio is not None
+        else safety.get("valid_signal_ratio", 5.0)
+    )
+    overload_peak = float(
+        args.overload_peak
+        if args.overload_peak is not None
+        else overload.get("raw_peak_overload", 30000.0)
+    )
+    overload_clip_ratio = float(
+        args.overload_clip_ratio
+        if args.overload_clip_ratio is not None
+        else overload.get("clip_ratio_overload", 0.001)
+    )
+
+    return ViewerThresholds(
+        no_signal_ratio=no_signal_ratio,
+        valid_signal_ratio=valid_signal_ratio,
+        overload_peak=overload_peak,
+        overload_clip_ratio=overload_clip_ratio,
+    )
+
+
 def main() -> None:
     args = parse_args()
     receiver_cfg, ml_cfg = load_viewer_configs(args)
@@ -135,12 +176,7 @@ def main() -> None:
     latest_image_dir = to_project_path(args.latest_image_dir)
     csv_path = log_dir / f"{session_id}_live_cnn_viewer_yaml_log.csv"
 
-    thresholds = ViewerThresholds(
-        no_signal_ratio=args.no_signal_ratio,
-        valid_signal_ratio=args.valid_signal_ratio,
-        overload_peak=args.overload_peak,
-        overload_clip_ratio=args.overload_clip_ratio,
-    )
+    thresholds = _build_viewer_thresholds_from_yaml(ml_cfg, args)
 
     block_size = int(infer_receiver_value(receiver_cfg, "block_size", args.block_size or 16384))
     center_freq = infer_receiver_value(receiver_cfg, "center_freq", args.center_freq)
@@ -175,7 +211,8 @@ def main() -> None:
     print(f"positive_class     : {decision_cfg.positive_class}")
     print(f"threshold default  : {decision_cfg.default_drone_threshold}")
     print(f"temporal           : window={voting_cfg.window_size}, candidate={voting_cfg.candidate_vote_k}, confirmed={voting_cfg.confirmed_vote_k}")
-    print("note               : model/threshold/voting are loaded from configs/ml.yaml")
+    print(f"raw_safety         : no_signal={thresholds.no_signal_ratio}, valid={thresholds.valid_signal_ratio}, overload_peak={thresholds.overload_peak}, clip_ratio={thresholds.overload_clip_ratio}")
+    print("note               : model/threshold/voting/raw_safety are loaded from configs/ml.yaml")
     print("Press Ctrl+C to stop.")
 
     plt = prepare_matplotlib(args.no_display)
@@ -240,7 +277,7 @@ def main() -> None:
                     rx_index=rx_index,
                     frame_size=args.frame_size,
                     hop_size=args.hop_size,
-                    overload_peak=args.overload_peak,
+                    overload_peak=thresholds.overload_peak,
                 )
                 blocks.append(block)
                 raw_features_list.append(features)
@@ -274,7 +311,6 @@ def main() -> None:
             candidate_status = False
             confirmed_status = False
             final_decision = "NA"
-            vote_count = 0
 
             if args.decision_mode != "none":
                 cnn_threshold = select_drone_threshold(decision_cfg, gain)
