@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.calibration.gain_noise_calibration import (
+    GainNoiseCalibrationSet,
+    get_noise_threshold_for_gain as _get_gain_noise_threshold_for_gain,
+    load_gain_noise_calibration as _load_gain_noise_calibration,
+)
+
 import json
 import numpy as np
 
@@ -16,7 +22,7 @@ from src.preprocess import (
 DEFAULT_CALIBRATION_DIR = Path("outputs") / "calibration"
 DEFAULT_NOISE_PATH = DEFAULT_CALIBRATION_DIR / "noise_latest.json"
 DEFAULT_PHASE_GAIN_PATH = DEFAULT_CALIBRATION_DIR / "phase_gain_latest.json"
-
+DEFAULT_GAIN_NOISE_PATH = DEFAULT_CALIBRATION_DIR / "noise_by_gain_latest.json"
 
 @dataclass(frozen=True)
 class NoiseCalibrationParams:
@@ -298,3 +304,30 @@ def get_energy_threshold(
         return float(fallback_threshold)
 
     raise ValueError("Noise calibration is not loaded and fallback_threshold is None.")
+
+
+def load_gain_noise_calibration(
+    path: str | Path = DEFAULT_GAIN_NOISE_PATH,
+) -> GainNoiseCalibrationSet:
+    """
+    noise_by_gain_latest.json을 읽어서 gain별 noise profile set으로 변환한다.
+    """
+    return _load_gain_noise_calibration(path)
+
+
+def get_energy_threshold_for_gain(
+    profile_set: GainNoiseCalibrationSet,
+    gain: int | float,
+    *,
+    allow_nearest: bool = True,
+) -> float:
+    """
+    현재 gain에 맞는 energy threshold를 반환한다.
+
+    integrated CLI / live viewer / runtime detector에서 공통으로 사용한다.
+    """
+    return _get_gain_noise_threshold_for_gain(
+        profile_set,
+        gain,
+        allow_nearest=allow_nearest,
+    )

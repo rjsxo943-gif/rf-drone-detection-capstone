@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable
+from src.calibration.raw_iq_safety import check_raw_iq_safety
 
 import json
 import numpy as np
@@ -100,6 +101,79 @@ def _validate_gain_list(gain_list: list[int | float]) -> list[float]:
     gains = [float(gain) for gain in gain_list]
     return sorted(dict.fromkeys(gains))
 
+def summarize_blocks_safety(
+    blocks: list[np.ndarray],
+    *,
+    full_scale: float = 1.0,
+    saturation_ratio_warn: float = 0.001,
+    saturation_ratio_clip: float = 0.01,
+    near_saturation_level: float = 0.85,
+    saturation_level: float = 0.98,
+) -> dict[str, Any]:
+    """
+    여러 IQ block의 Raw IQ safety 결과를 요약한다.
+
+    gain별 noise calibration 중 수집된 blocks가 포화 상태였는지 확인하기 위한 용도.
+    """
+    if not blocks:
+        raise ValueError("blocks must not be empty")
+
+    results = [
+        check_raw_iq_safety(
+            block,
+            full_scale=full_scale,
+            saturation_ratio_warn=saturation_ratio_warn,
+            saturation_ratio_clip=saturation_ratio_clip,
+            near_saturation_level=near_saturation_level,
+            saturation_level=saturation_level,
+        )
+        for block in blocks
+    ]
+
+    status_rank = {
+        "SAFE": 0,
+        "WEAK": 1,
+        "WARNING": 2,
+        "CLIPPED": 3,
+    }
+
+    worst = max(
+        results,
+        key=lambda item: status_rank.get(item.status, 99),
+    )
+
+    max_abs_values = np.asarray([x.max_abs for x in results], dtype=np.float64)
+    rms_values = np.asarray([x.rms for x in results], dtype=np.float64)
+    dc_abs_values = np.asarray([x.dc_abs for x in results], dtype=np.float64)
+    saturation_values = np.asarray(
+        [x.saturation_ratio for x in results],
+        dtype=np.float64,
+    )
+    near_saturation_values = np.asarray(
+        [x.near_saturation_ratio for x in results],
+        dtype=np.float64,
+    )
+
+    return {
+        "status": worst.status,
+        "is_safe": bool(worst.status == "SAFE"),
+        "num_blocks": int(len(results)),
+        "max_abs_mean": float(np.mean(max_abs_values)),
+        "max_abs_max": float(np.max(max_abs_values)),
+        "rms_mean": float(np.mean(rms_values)),
+        "rms_max": float(np.max(rms_values)),
+        "dc_abs_mean": float(np.mean(dc_abs_values)),
+        "dc_abs_max": float(np.max(dc_abs_values)),
+        "saturation_ratio_mean": float(np.mean(saturation_values)),
+        "saturation_ratio_max": float(np.max(saturation_values)),
+        "near_saturation_ratio_mean": float(np.mean(near_saturation_values)),
+        "near_saturation_ratio_max": float(np.max(near_saturation_values)),
+        "full_scale": float(full_scale),
+        "saturation_level": float(saturation_level),
+        "near_saturation_level": float(near_saturation_level),
+        "note": worst.note,
+    }
+
 
 def calibrate_noise_by_gain(
     gain_list: list[int | float],
@@ -155,17 +229,28 @@ def calibrate_noise_by_gain(
             center_freq=center_freq,
         )
 
+        safety = summarize_blocks_safety(
+            blocks,
+            full_scale=1.0,
+        )
+
         profile = GainNoiseCalibrationResult(
             gain=gain,
             result=result,
         )
-        profiles[gain_to_key(gain)] = profile.to_dict()
+
+        profile_dict = profile.to_dict()
+        profile_dict["safety"] = safety
+
+        profiles[gain_to_key(gain)] = profile_dict
 
         print(
             f"  gain={gain:g} | "
             f"noise_floor={result.noise_floor:.10g} | "
             f"threshold={result.threshold:.10g} | "
-            f"noise_std={result.noise_std:.10g}"
+            f"noise_std={result.noise_std:.10g} | "
+            f"safety={safety['status']} | "
+            f"sat_max={safety['saturation_ratio_max'] * 100:.3f}%"
         )
 
     return GainNoiseCalibrationSet(

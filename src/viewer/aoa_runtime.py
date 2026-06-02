@@ -9,6 +9,12 @@ import numpy as np
 
 from src.aoa import coherence_gate, estimate_phase_diff, phase_diff_to_angle
 from src.features.spectrogram import compute_stft_branch
+from src.calibration.phase_gain_by_gain_calibration import (
+    GainPhaseGainCalibrationSet,
+    get_phase_gain_correction_for_gain,
+    get_phase_gain_profile_for_gain,
+    load_phase_gain_by_gain_calibration,
+)
 
 
 PHASE_OFFSET_RAD_KEYS = (
@@ -43,6 +49,7 @@ class AoARuntime:
     speed_of_light: float = 300_000_000.0
     phase_calibration_json: str | Path | None = None
     gain_phase_table_json: str | Path | None = None
+    phase_gain_profile_json: str | Path | None = None
     manual_phase_offset_deg: float = 0.0
     ref_channel: int = 0
     target_channel: int = 1
@@ -58,6 +65,8 @@ class AoARuntime:
     phase_offset_to_apply_rad: float = field(init=False)
     phase_offset_source: str = field(init=False, default="manual")
     gain_phase_entries: list[dict[str, float]] = field(init=False, default_factory=list)
+    phase_gain_profiles: GainPhaseGainCalibrationSet | None = field(init=False, default=None)
+    gain_correction_to_apply: float = field(init=False, default=1.0)
 
     def __post_init__(self) -> None:
         self.phase_offset_to_apply_rad = float(np.deg2rad(self.manual_phase_offset_deg))
@@ -69,12 +78,44 @@ class AoARuntime:
             self.phase_offset_source = str(self.phase_calibration_json)
 
         self.gain_phase_entries = self._load_gain_phase_table(self.gain_phase_table_json)
+        self.phase_gain_profiles = self._load_phase_gain_profile(
+            self.phase_gain_profile_json
+        )
         self.update_gain(self.gain)
 
     def update_gain(self, gain: float) -> None:
-        """Update the phase offset when receiver gain changes."""
+        """Update RX1 gain/phase compensation when receiver gain changes."""
 
         self.gain = float(gain)
+
+        # New path: gain-wise phase/gain profile JSON.
+        if self.phase_gain_profiles is not None:
+            profile = get_phase_gain_profile_for_gain(
+                self.phase_gain_profiles,
+                self.gain,
+                allow_nearest=True,
+            )
+            gain_correction, phase_offset_rad = get_phase_gain_correction_for_gain(
+                self.phase_gain_profiles,
+                self.gain,
+                allow_nearest=True,
+            )
+
+            self.gain_correction_to_apply = float(gain_correction)
+            self.phase_offset_to_apply_rad = float(phase_offset_rad)
+
+            matched_gain = float(profile.get("matched_gain", profile.get("gain", self.gain)))
+            matched_by = str(profile.get("matched_by", "exact"))
+            quality = str(profile.get("quality", "UNKNOWN"))
+
+            self.phase_offset_source = (
+                f"{self.phase_gain_profile_json} "
+                f"gain={matched_gain:.1f} {matched_by} quality={quality}"
+            )
+            return
+
+        # Legacy fallback: gain phase table.
+        self.gain_correction_to_apply = 1.0
         if not self.gain_phase_entries:
             return
 
@@ -124,6 +165,7 @@ class AoARuntime:
             "phase_diff_corrected_deg": float(corrected_phase.phase_diff_deg),
             "phase_offset_to_apply_rad": float(self.phase_offset_to_apply_rad),
             "phase_offset_to_apply_deg": float(np.rad2deg(self.phase_offset_to_apply_rad)),
+            "gain_correction_to_apply": float(self.gain_correction_to_apply),
             "phase_offset_source": self.phase_offset_source,
             "coherence_like": float(corrected_phase.coherence_like),
             "num_samples": int(corrected_phase.num_samples),
@@ -160,13 +202,15 @@ class AoARuntime:
 
     def status_text(self) -> str:
         return (
-            f"AOA offset={np.rad2deg(self.phase_offset_to_apply_rad):.2f} deg "
+            f"AOA gain_corr={self.gain_correction_to_apply:.4g} "
+            f"offset={np.rad2deg(self.phase_offset_to_apply_rad):.2f} deg "
             f"src={self.phase_offset_source}"
         )
 
     def _apply_target_phase_correction(self, iq_2d: np.ndarray) -> np.ndarray:
         corrected = np.array(iq_2d, dtype=np.complex64, copy=True)
         correction = np.exp(-1j * float(self.phase_offset_to_apply_rad)).astype(np.complex64)
+        corrected[self.target_channel] *= np.complex64(self.gain_correction_to_apply)
         corrected[self.target_channel] *= correction
         return corrected
 
@@ -203,6 +247,19 @@ class AoARuntime:
         if arr.shape[0] < 2:
             raise ValueError(f"AoA mode requires at least 2 channels. got shape={arr.shape}")
         return arr.astype(np.complex64, copy=False)
+
+    @staticmethod
+    def _load_phase_gain_profile(
+        path: str | Path | None,
+    ) -> GainPhaseGainCalibrationSet | None:
+        if path is None:
+            return None
+
+        path_obj = Path(path)
+        if not path_obj.exists():
+            return None
+
+        return load_phase_gain_by_gain_calibration(path_obj)
 
     @classmethod
     def _load_phase_offset_file(cls, path: str | Path | None) -> float | None:

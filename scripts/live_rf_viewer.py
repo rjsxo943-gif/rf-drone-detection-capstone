@@ -9,6 +9,7 @@ import numpy as np
 
 from src.features.spectrogram import compute_stft_branch
 from src.receiver.pluto_receiver import PlutoReceiver
+from src.runtime.calibration_runtime import load_calibration_runtime
 from src.viewer import (
     AoARuntime,
     CNNRuntime,
@@ -110,6 +111,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aoa-phase-calibration-json", default=None)
     parser.add_argument("--aoa-gain-phase-table", default=None)
     parser.add_argument("--aoa-phase-offset-deg", type=float, default=0.0)
+    parser.add_argument(
+        "--noise-profile",
+        default="outputs/calibration/noise_by_gain_latest.json",
+        help="Gain-wise noise calibration JSON path.",
+    )
+    parser.add_argument(
+        "--phase-gain-profile",
+        default="outputs/calibration/phase_gain_by_gain_latest.json",
+        help="Gain-wise phase/gain calibration JSON path.",
+    )
+    parser.add_argument(
+        "--disable-calibration-runtime",
+        action="store_true",
+        help="Disable gain-wise calibration runtime lookup.",
+    )
     parser.add_argument("--aoa-ref-channel", type=int, default=0)
     parser.add_argument("--aoa-target-channel", type=int, default=1)
     parser.add_argument("--aoa-antenna-spacing-m", type=float, default=0.0625)
@@ -205,6 +221,7 @@ def build_aoa_runtime(args: argparse.Namespace) -> AoARuntime:
         speed_of_light=float(args.aoa_speed_of_light),
         phase_calibration_json=args.aoa_phase_calibration_json,
         gain_phase_table_json=args.aoa_gain_phase_table,
+        phase_gain_profile_json=args.phase_gain_profile,
         manual_phase_offset_deg=float(args.aoa_phase_offset_deg),
         ref_channel=int(args.aoa_ref_channel),
         target_channel=int(args.aoa_target_channel),
@@ -288,6 +305,39 @@ def compute_view_spectrogram(iq_1d: np.ndarray, args: argparse.Namespace) -> np.
         print("VIEW SPEC SHAPE:", "raw=", stft.cnn_spectrogram.shape, "display=", spec.shape)
     return spec
 
+def format_calibration_status(
+    calibration_noise_result: Any | None = None,
+    calibration_phase_result: Any | None = None,
+) -> str | None:
+    """
+    OpenCV overlay에 표시할 calibration 상태 한 줄을 만든다.
+    """
+    if calibration_noise_result is None and calibration_phase_result is None:
+        return None
+
+    parts: list[str] = []
+
+    if calibration_noise_result is not None:
+        parts.append(
+            "CAL noise="
+            f"{calibration_noise_result.matched_gain:g}/"
+            f"{calibration_noise_result.matched_by} "
+            f"thr={calibration_noise_result.threshold:.4g} "
+            f"raw={calibration_noise_result.raw_safety_status} "
+            f"sat={calibration_noise_result.raw_saturation_ratio * 100:.3f}%"
+        )
+
+    if calibration_phase_result is not None:
+        parts.append(
+            "phase_gain="
+            f"{calibration_phase_result.matched_gain:g}/"
+            f"{calibration_phase_result.matched_by} "
+            f"corr={calibration_phase_result.gain_correction:.4g} "
+            f"phase={calibration_phase_result.phase_offset_deg:.2f}deg "
+            f"quality={calibration_phase_result.quality}"
+        )
+
+    return " | ".join(parts)
 
 def build_overlay(
     state: ViewerState,
@@ -296,6 +346,7 @@ def build_overlay(
     aoa_result: dict[str, Any] | None = None,
     cnn_result: dict[str, Any] | None = None,
     log_status: str | None = None,
+    calibration_status: str | None = None,
 ) -> list[str]:
     lines = [
         f"mode={state.mode} idx={state.update_index} {'PAUSED' if state.paused else 'LIVE'}",
@@ -312,6 +363,8 @@ def build_overlay(
         lines.append(profile_status)
     if log_status:
         lines.append(log_status)
+    if calibration_status:
+        lines.append(calibration_status)
     if cnn_result:
         raw_class = cnn_result.get("cnn_raw_class_name", "Unknown")
         raw_conf = float(cnn_result.get("cnn_raw_confidence", 0.0))
@@ -347,6 +400,8 @@ def build_live_log_row(
     cnn_result: dict[str, Any] | None = None,
     aoa_result: dict[str, Any] | None = None,
     profile_status: str | None = None,
+    calibration_noise_result: Any | None = None,
+    calibration_phase_result: Any | None = None,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "mode": state.mode,
@@ -364,8 +419,39 @@ def build_live_log_row(
     row.update(raw)
     if cnn_result:
         row.update(cnn_result)
+
     if aoa_result:
         row.update(aoa_result)
+
+    if calibration_noise_result is not None:
+        row.update(
+            {
+                "calib_noise_threshold": calibration_noise_result.threshold,
+                "calib_noise_matched_gain": calibration_noise_result.matched_gain,
+                "calib_noise_matched_by": calibration_noise_result.matched_by,
+                "calib_profile_safety_status": calibration_noise_result.profile_safety_status,
+                "raw_safety_status": calibration_noise_result.raw_safety_status,
+                "raw_safety_is_safe": calibration_noise_result.raw_is_safe,
+                "raw_safety_max_abs": calibration_noise_result.raw_max_abs,
+                "raw_safety_rms": calibration_noise_result.raw_rms,
+                "raw_safety_dc_abs": calibration_noise_result.raw_dc_abs,
+                "raw_safety_saturation_ratio": calibration_noise_result.raw_saturation_ratio,
+                "raw_safety_near_saturation_ratio": calibration_noise_result.raw_near_saturation_ratio,
+            }
+        )
+
+    if calibration_phase_result is not None:
+        row.update(
+            {
+                "calib_phase_gain_matched_gain": calibration_phase_result.matched_gain,
+                "calib_phase_gain_matched_by": calibration_phase_result.matched_by,
+                "calib_gain_correction": calibration_phase_result.gain_correction,
+                "calib_phase_offset_rad": calibration_phase_result.phase_offset_rad,
+                "calib_phase_offset_deg": calibration_phase_result.phase_offset_deg,
+                "calib_phase_gain_quality": calibration_phase_result.quality,
+            }
+        )
+
     return row
 
 
@@ -452,6 +538,15 @@ def run() -> int:
     if args.mode in ("cnn", "full"):
         cnn_runtime = build_cnn_runtime(args)
 
+    calibration_runtime = None
+    if not args.disable_calibration_runtime:
+        calibration_runtime = load_calibration_runtime(
+            noise_profile_path=args.noise_profile,
+            phase_gain_profile_path=args.phase_gain_profile,
+            allow_nearest=True,
+            full_scale=1.0,
+        )
+
     renderer = OpenCVRenderer(
         window_name=f"RF Viewer - {args.mode}",
         target_fps=args.target_fps,
@@ -475,6 +570,24 @@ def run() -> int:
                 last_iq,
                 overload_abs_threshold=args.overload_threshold,
             )
+            
+            calibration_noise_result = None
+            calibration_phase_result = None
+            calibration_status = None
+
+            if calibration_runtime is not None:
+                calibration_noise_result = calibration_runtime.check_noise(
+                    last_iq,
+                    gain=state.gain,
+                )
+                calibration_phase_result = calibration_runtime.get_phase_gain(
+                    gain=state.gain,
+                )
+                calibration_status = format_calibration_status(
+                    calibration_noise_result=calibration_noise_result,
+                    calibration_phase_result=calibration_phase_result,
+                )
+
             cnn_result = None
             if cnn_runtime is not None:
                 image, cnn_result = cnn_runtime.process(last_iq)
@@ -514,6 +627,8 @@ def run() -> int:
                         cnn_result=cnn_result,
                         aoa_result=aoa_result,
                         profile_status=profile_status,
+                        calibration_noise_result=calibration_noise_result,
+                        calibration_phase_result=calibration_phase_result,
                     ),
                 )
 
@@ -524,6 +639,7 @@ def run() -> int:
                 aoa_result,
                 cnn_result,
                 log_status,
+                calibration_status,
             )
             key = renderer.render(image, overlay)
             handle_key(key, state, receiver, profile, aoa_runtime, cnn_runtime, args)
@@ -535,6 +651,7 @@ def run() -> int:
         renderer.close()
 
     return 0
+    
 
 
 if __name__ == "__main__":
