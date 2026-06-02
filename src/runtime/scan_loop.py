@@ -219,6 +219,7 @@ def setup_scan_runtime(
         decision_cfg=decision_cfg,
         current_gain=current_gain,
         aoa_cfg=aoa_cfg,
+        cnn_rx_index=int((ml_cfg.get("cnn_input", {}) or {}).get("rx_index", 0)),
     )
 
     return ScanRuntime(
@@ -256,6 +257,12 @@ def _reset_aoa_smoothing_if_available(analyzer: PrecisionAnalyzer) -> None:
         history.clear()
 
 
+def _reset_temporal_history_if_available(analyzer: PrecisionAnalyzer) -> None:
+    reset_fn = getattr(analyzer, "reset_temporal_history", None)
+    if callable(reset_fn):
+        reset_fn()
+
+
 def run_precision_screening(
     runtime: ScanRuntime,
     *,
@@ -270,6 +277,10 @@ def run_precision_screening(
     blocks = max(1, int(cfg.get("precision_blocks", runtime.analyzer.precision_blocks)))
     require_confirmed = bool(cfg.get("require_confirmed", True))
     allow_candidate = bool(cfg.get("allow_candidate", False))
+
+    # New energy trigger -> new CNN screening sequence.
+    # Reset temporal voting here, then keep it alive into precision hold if accepted.
+    _reset_temporal_history_if_available(runtime.analyzer)
 
     previous_blocks = _set_analyzer_precision_blocks(runtime.analyzer, blocks)
     try:

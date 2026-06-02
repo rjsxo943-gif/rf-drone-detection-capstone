@@ -40,20 +40,17 @@ def compute_runtime_cnn_spectrogram(
     nfft: int,
 ) -> np.ndarray:
     """
-    Build the exact CNN spectrogram used by the YAML live viewer.
+    live_cnn_spectrogram_viewer_yaml.py와 같은 CNN 입력 생성 경로.
 
-    This intentionally matches scripts/live_cnn_spectrogram_viewer.py:
-    - remove DC from the original IQ block
-    - select rx_index
-    - peak-normalize the selected channel
-    - STFT with Hann window
+    순서:
+    - remove DC
+    - rx_index 선택
+    - peak normalize
+    - Hann STFT
     - fftshift
     - log1p magnitude
-    - min-max normalize
-    - return shape (freq_bins, time_frames)
-
-    Do not replace this with the older 20*log10 path unless the model is
-    retrained with that input convention.
+    - minmax normalize
+    - return shape: (freq_bins, time_frames)
     """
     iq_no_dc = remove_dc_offset(_ensure_2d_iq(iq_block))
     cnn_iq = get_cnn_input_iq(iq_no_dc, rx_index=int(rx_index))
@@ -62,11 +59,13 @@ def compute_runtime_cnn_spectrogram(
 
     hop_size = int(nperseg) - int(noverlap)
     frames = _frame_1d(cnn_iq, frame_size=int(nperseg), hop_size=hop_size)
+
     window = np.hanning(int(nperseg)).astype(np.float32)
     windowed = frames * window.reshape(1, -1)
 
     stft = np.fft.fft(windowed, n=int(nfft), axis=1)
     stft = np.fft.fftshift(stft, axes=1)
+
     mag = np.abs(stft).astype(np.float32)
     spec = np.log1p(mag)
 

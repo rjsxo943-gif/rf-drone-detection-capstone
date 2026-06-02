@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 
-from src.preprocess import remove_dc_offset, normalize_iq, get_cnn_input_iq
-from src.runtime.cnn_capture_actions import _compute_cnn_spectrogram_numpy
+from src.preprocess import remove_dc_offset, normalize_iq
+from src.features.cnn_input import compute_runtime_cnn_spectrogram
 from src.features.spectrogram import compute_dual_channel_stft_branch
 from src.aoa.coherence import coherence_gate
 from src.aoa.phase_diff import estimate_phase_diff
@@ -105,6 +105,7 @@ class PrecisionAnalyzer:
         decision_cfg: RuntimeDecisionConfig | None = None,
         current_gain: int | float | None = None,
         aoa_cfg: dict[str, Any] | None = None,
+        cnn_rx_index: int = 0,
     ) -> None:
         self.receiver = receiver
         self.num_samples = int(num_samples)
@@ -115,6 +116,7 @@ class PrecisionAnalyzer:
         self.noverlap = int(noverlap)
         self.nfft = int(nfft)
         self.window = str(window)
+        self.cnn_rx_index = int(cnn_rx_index)
 
         self.aoa_cfg = aoa_cfg or {}
         self.coherence_cfg = self.aoa_cfg.get("coherence", {}) or {}
@@ -158,6 +160,15 @@ class PrecisionAnalyzer:
         self.reset_smoothing_on_not_confirmed = bool(
             self.runtime_cfg.get("reset_smoothing_on_not_confirmed", True)
         )
+
+        # IMPORTANT:
+        # Temporal voting must persist across analyze() calls during precision hold.
+        # Otherwise blocks_per_step=1 always produces votes=1/5 and never confirmed=True.
+        if self.decision_cfg is not None:
+            vote_window = int(self.decision_cfg.temporal_voting.window_size)
+        else:
+            vote_window = int(self.precision_blocks)
+        self.vote_history: deque[int] = deque(maxlen=max(1, vote_window))
 
         if self.save_dir is not None:
             self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -255,6 +266,14 @@ class PrecisionAnalyzer:
 
         return smoothed, True, len(self.angle_history), None
 
+    def reset_temporal_history(self) -> None:
+        """Reset CNN temporal voting history.
+
+        Called before a new CNN screening sequence starts.
+        During precision hold, this history is intentionally preserved block-to-block.
+        """
+        self.vote_history.clear()
+
     def _empty_result(self, center_freq: float) -> PrecisionAnalysisResult:
         temporal_window = None
         if self.decision_cfg is not None:
@@ -312,11 +331,9 @@ class PrecisionAnalyzer:
             drone_threshold = select_drone_threshold(self.decision_cfg, current_gain)
 
         best: dict[str, Any] | None = None
-        vote_history: deque[int]
-        if self.decision_cfg is not None:
-            vote_history = deque(maxlen=int(self.decision_cfg.temporal_voting.window_size))
-        else:
-            vote_history = deque(maxlen=self.precision_blocks)
+        # Use persistent voting history.
+        # This is required for precision hold with blocks_per_step=1.
+        vote_history = self.vote_history
 
         recent: list[int] = []
         vote_count = 0
@@ -333,9 +350,6 @@ class PrecisionAnalyzer:
             if iq.ndim != 2 or iq.shape[0] < 2:
                 continue
 
-            cnn_iq = get_cnn_input_iq(iq_dc, rx_index=0)
-            cnn_iq = normalize_iq(cnn_iq, axis=-1, method="peak")
-
             branch = compute_dual_channel_stft_branch(
                 rx0_iq=iq[self.ref_channel],
                 rx1_iq=iq[self.target_channel],
@@ -347,12 +361,12 @@ class PrecisionAnalyzer:
                 cnn_source="rx0",
             )
 
-            cnn_spectrogram = _compute_cnn_spectrogram_numpy(
-                cnn_iq,
+            cnn_spectrogram = compute_runtime_cnn_spectrogram(
+                iq_raw,
+                rx_index=self.cnn_rx_index,
                 nperseg=self.nperseg,
-                hop_size=self.nperseg - self.noverlap,
+                noverlap=self.noverlap,
                 nfft=self.nfft,
-                window=self.window,
             )
 
             cnn_result = None
@@ -361,7 +375,7 @@ class PrecisionAnalyzer:
                 cnn_result = self.cnn_classifier.predict(cnn_spectrogram)
                 selection_score = self._drone_probability(cnn_result)
             else:
-                selection_score = self._fft_selection_score(cnn_iq)
+                selection_score = self._fft_selection_score(cnn_spectrogram)
 
             raw_vote = 0
             if self.cnn_classifier is not None and drone_threshold is not None:
