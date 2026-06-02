@@ -25,53 +25,46 @@ scan:
   # ----------------------------------------------------------
   # Precision hold mode
   # ----------------------------------------------------------
-  # 올바른 흐름:
+  # 흐름:
   # 1) 에너지 trigger
-  # 2) CNN screening
-  # 3) CNN이 Drone으로 판정한 경우에만 precision hold 진입
-  # 4) NotDrone이면 hold에 들어가지 않고 scan 복귀
+  # 2) CNN screening 5블럭
+  # 3) confirmed면 precision hold 진입
+  # 4) hold 중에는 1블럭씩 계속 확인
+  # 5) Drone hit가 나오면 현재 block + 7까지 hold 연장
+  # 6) hold_until_block을 지나면 scan 복귀
   # ----------------------------------------------------------
   precision_hold:
     enabled: true
 
-    # hold 진입 전 CNN screening
     entry_screening:
       enabled: true
-
-      # screening용 analyzer.analyze() 1회에서 읽을 precision block 수
       precision_blocks: 5
-
-      # true: confirmed_status=True일 때만 hold 진입
-      # false: candidate_status=True여도 hold 진입 가능
       require_confirmed: true
-
-      # require_confirmed=false일 때 candidate도 Drone 후보로 인정할지 여부
       allow_candidate: false
-
-      # NotDrone이면 hold 진입하지 않고 scan 복귀
       reject_not_drone: true
 
-    # hold 진입 후 최소 유지 decision 수
-    min_hold_decisions: 3
+    hold_mode: sliding_block_grace
 
-    # confirmed 이후에도 너무 오래 lock되지 않도록 제한
-    max_hold_decisions: 20
+    # hold 중 analyzer.analyze() 1회에서 읽을 block 수.
+    # block-level grace를 쓰기 위해 기본 1로 둔다.
+    blocks_per_step: 1
 
-    # hold에 들어간 뒤 NotDrone이 연속으로 나와도 바로 scan 복귀하지 않는 유예 decision 수
-    lost_grace_decisions: 4
+    # Drone hit가 한 번 나오면 현재 hold block 기준 +7까지 무조건 관찰
+    grace_blocks_after_drone: 7
 
-    # hold 중 analyzer.analyze() 1회에서 읽을 precision block 수
-    # 기존 precision_blocks_per_candidate=10보다 작게 두면 hold 반응이 더 자주 보인다.
-    precision_blocks_per_decision: 5
+    # 너무 오래 lock되는 것 방지
+    max_hold_blocks: 100
 
-    # hold에 들어간 뒤 confirmed를 한 번도 못 보면 grace exit 허용 여부
-    require_confirmed_once_before_grace_exit: false
+    # hold 진입 직후 최소 관찰 block 수
+    min_hold_blocks: 7
 
-    # hold 진입 후에는 candidate면 lost로 보지 않고 hold 유지
-    treat_candidate_as_alive: true
+    # hold 연장 조건
+    extend_on_raw_drone_hit: true
+    extend_on_candidate: false
+    extend_on_confirmed: false
 
     # 새 hold 진입 시 AoA smoothing history 초기화
     reset_aoa_smoothing_on_enter: true
 
-    # hold decision 사이 쉬는 시간
-    decision_delay_sec: 0.0
+    # block 사이 쉬는 시간
+    block_delay_sec: 0.0
