@@ -21,3 +21,44 @@ scan:
   save_stft: false
 
   cnn_enabled: true
+
+  # ----------------------------------------------------------
+  # Precision hold mode
+  # ----------------------------------------------------------
+  # 목적:
+  # - scan trigger 후 바로 scan으로 복귀하지 않고 trigger 주파수에 잠시 lock
+  # - Drone confirmed / candidate 상태를 보면서 같은 center_freq에서 정밀 분석 유지
+  # - 몇 번 NotDrone이 나와도 lost_grace_decisions 동안 유예
+  #
+  # 주의:
+  # - 1 hold decision은 analyzer.analyze() 1회다.
+  # - 1 decision 안에서 precision_blocks_per_decision개 IQ block을 읽는다.
+  # - 즉 실제 IQ block 수 = decisions × precision_blocks_per_decision
+  # ----------------------------------------------------------
+  precision_hold:
+    enabled: true
+
+    # trigger 직후 최소 유지 decision 수
+    min_hold_decisions: 3
+
+    # confirmed 이후에도 너무 오래 lock되지 않도록 제한
+    max_hold_decisions: 20
+
+    # NotDrone이 연속으로 나와도 바로 scan 복귀하지 않는 유예 decision 수
+    lost_grace_decisions: 4
+
+    # hold 중 analyzer.analyze() 1회에서 읽을 precision block 수
+    # 기존 precision_blocks_per_candidate=10보다 작게 두면 hold 반응이 더 자주 보인다.
+    precision_blocks_per_decision: 5
+
+    # trigger 후 아직 confirmed가 없어도 min_hold_decisions까지는 유지
+    require_confirmed_once_before_grace_exit: false
+
+    # candidate면 lost로 보지 않고 hold 유지
+    treat_candidate_as_alive: true
+
+    # 새 hold 진입 시 AoA smoothing history 초기화
+    reset_aoa_smoothing_on_enter: true
+
+    # hold decision 사이 쉬는 시간
+    decision_delay_sec: 0.0
