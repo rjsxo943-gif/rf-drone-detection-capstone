@@ -272,6 +272,9 @@ def main() -> None:
             initial_distance=args.distance_m,
             initial_memo=args.memo,
         )
+        # setup_gain_widgets() creates many widget axes.
+        # Force drawing back to the main spectrogram axis.
+        plt.sca(ax)
         image_handle, text_handle = _initialize_display_window(
             plt,
             image_handle,
@@ -434,6 +437,9 @@ def main() -> None:
             side_text = build_side_text(row)
 
             if not args.no_display:
+                # Always draw spectrogram on the main large axis,
+                # not on the TextBox/Button axes.
+                plt.sca(ax)
                 image_handle, text_handle = update_display(
                     plt, image_handle, text_handle, spec, title, side_text
                 )

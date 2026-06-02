@@ -21,7 +21,7 @@
 source_type: sdr  # sim, file, sdr 중 하나 선택
 
 sample_rate: 5000000
-center_freq: 2437000000
+center_freq: 2450000000
 
 block_size: 16384
 num_samples: 16384
@@ -63,12 +63,12 @@ sdr:
 
   channels: [0, 1]
 
-  center_freq: 2437000000
+  center_freq: 2450000000
   sample_rate: 5000000
   rf_bandwidth: 5000000
 
   gain_control_mode: manual
-  gain: 15
+  gain: 30
 
   num_samples: 16384
   block_size: 16384
