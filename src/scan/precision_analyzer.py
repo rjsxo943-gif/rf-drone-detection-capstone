@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,12 @@ from src.aoa.coherence import coherence_gate
 from src.aoa.phase_diff import estimate_phase_diff
 from src.aoa.angle_estimator import phase_diff_to_angle
 from src.aoa.sector_quantizer import quantize_front_angle_to_sector
+from src.ml.runtime_decision import (
+    RuntimeDecisionConfig,
+    get_positive_probability,
+    select_drone_threshold,
+    update_temporal_decision,
+)
 
 
 @dataclass
@@ -47,6 +54,16 @@ class PrecisionAnalysisResult:
     selected_block_index: int | None = None
     selection_score: float | None = None
 
+    drone_probability: float | None = None
+    drone_threshold: float | None = None
+    temporal_window: int | None = None
+    drone_vote_count: int | None = None
+    temporal_history: list[int] | None = None
+    candidate_status: bool | None = None
+    confirmed_status: bool | None = None
+    final_decision: str | None = None
+    aoa_skipped_reason: str | None = None
+
 
 class PrecisionAnalyzer:
     """
@@ -55,9 +72,9 @@ class PrecisionAnalyzer:
     핵심:
     - scan trigger 후 해당 center_freq로 다시 tuning
     - precision block 여러 개 수집
-    - CNN이 있으면 Drone-like 확률이 가장 높은 block 선택
-    - CNN이 없으면 FFT score가 가장 높은 block 선택
-    - 선택된 block으로 CNN/AoA/sector 결과 출력
+    - CNN binary Drone/NotDrone 결과를 YAML threshold로 평가
+    - temporal voting으로 candidate/confirmed 판단
+    - confirmed일 때만 AoA/sector 계산
     """
 
     def __init__(
@@ -77,6 +94,8 @@ class PrecisionAnalyzer:
         save_spectrogram: bool = False,
         save_stft: bool = False,
         cnn_classifier=None,
+        decision_cfg: RuntimeDecisionConfig | None = None,
+        current_gain: int | float | None = None,
     ) -> None:
         self.receiver = receiver
         self.num_samples = int(num_samples)
@@ -97,6 +116,8 @@ class PrecisionAnalyzer:
         self.save_stft = bool(save_stft)
 
         self.cnn_classifier = cnn_classifier
+        self.decision_cfg = decision_cfg
+        self.current_gain = current_gain
 
         if self.save_dir is not None:
             self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -121,22 +142,45 @@ class PrecisionAnalyzer:
         fft_mag = np.abs(np.fft.fftshift(np.fft.fft(x)))
         return float(np.max(fft_mag ** 2))
 
+    def _get_gain(self) -> float | None:
+        get_gain = getattr(self.receiver, "get_gain", None)
+        if callable(get_gain):
+            try:
+                return float(get_gain())
+            except Exception:
+                pass
+
+        if hasattr(self.receiver, "gain"):
+            try:
+                return float(self.receiver.gain)
+            except Exception:
+                pass
+
+        if self.current_gain is not None:
+            return float(self.current_gain)
+
+        return None
+
     def _drone_probability(self, cnn_result) -> float:
         if cnn_result is None:
             return 0.0
 
-        class_names = getattr(self.cnn_classifier, "class_names", None)
+        if self.decision_cfg is None:
+            class_names = getattr(self.cnn_classifier, "class_names", [])
+            return get_positive_probability(cnn_result, list(class_names), "Drone")
 
-        if class_names is not None and "Drone-like" in class_names:
-            idx = list(class_names).index("Drone-like")
-            return float(cnn_result.probabilities[idx])
-
-        if cnn_result.class_name == "Drone-like":
-            return float(cnn_result.confidence)
-
-        return 0.0
+        class_names = getattr(self.cnn_classifier, "class_names", [])
+        return get_positive_probability(
+            cnn_result,
+            list(class_names),
+            self.decision_cfg.positive_class,
+        )
 
     def _empty_result(self, center_freq: float) -> PrecisionAnalysisResult:
+        temporal_window = None
+        if self.decision_cfg is not None:
+            temporal_window = int(self.decision_cfg.temporal_voting.window_size)
+
         return PrecisionAnalysisResult(
             center_freq=float(center_freq),
             stft_done=False,
@@ -161,6 +205,15 @@ class PrecisionAnalyzer:
             precision_blocks=self.precision_blocks,
             selected_block_index=None,
             selection_score=None,
+            drone_probability=None,
+            drone_threshold=None,
+            temporal_window=temporal_window,
+            drone_vote_count=0,
+            temporal_history=[],
+            candidate_status=False,
+            confirmed_status=False,
+            final_decision="No valid precision block",
+            aoa_skipped_reason="no_valid_precision_block",
         )
 
     def analyze(self, center_freq: float) -> PrecisionAnalysisResult:
@@ -169,7 +222,23 @@ class PrecisionAnalyzer:
         if self.settle_sec > 0:
             time.sleep(self.settle_sec)
 
+        current_gain = self._get_gain()
+        drone_threshold = None
+        if self.decision_cfg is not None:
+            drone_threshold = select_drone_threshold(self.decision_cfg, current_gain)
+
         best: dict[str, Any] | None = None
+        vote_history: deque[int]
+        if self.decision_cfg is not None:
+            vote_history = deque(maxlen=int(self.decision_cfg.temporal_voting.window_size))
+        else:
+            vote_history = deque(maxlen=self.precision_blocks)
+
+        recent: list[int] = []
+        vote_count = 0
+        candidate_status = False
+        confirmed_status = False
+        final_decision = "NotDrone"
 
         for block_index in range(self.precision_blocks):
             iq_raw = self.receiver.read_samples(self.num_samples)
@@ -211,6 +280,24 @@ class PrecisionAnalyzer:
                 selection_score = self._drone_probability(cnn_result)
             else:
                 selection_score = self._fft_selection_score(cnn_iq)
+
+            raw_vote = 0
+            if self.cnn_classifier is not None and drone_threshold is not None:
+                raw_vote = int(float(selection_score) >= float(drone_threshold))
+
+            if self.decision_cfg is not None and self.decision_cfg.temporal_voting.enabled:
+                recent, vote_count, candidate_status, confirmed_status, final_decision = update_temporal_decision(
+                    vote_history,
+                    raw_vote,
+                    self.decision_cfg.temporal_voting,
+                )
+            else:
+                vote_history.append(raw_vote)
+                recent = list(vote_history)
+                vote_count = int(sum(recent))
+                candidate_status = bool(raw_vote)
+                confirmed_status = bool(raw_vote)
+                final_decision = "Confirmed Drone" if raw_vote else "NotDrone"
 
             if best is None or selection_score > best["selection_score"]:
                 best = {
@@ -259,33 +346,63 @@ class PrecisionAnalyzer:
                 np.save(rx0_stft_path, branch.rx0.complex_stft)
                 np.save(rx1_stft_path, branch.rx1.complex_stft)
 
-        coherence_result = coherence_gate(
-            z0=branch.rx0.complex_stft,
-            z1=branch.rx1.complex_stft,
-            threshold=self.coherence_threshold,
-            energy_percentile=75.0,
-        )
+        require_confirmed = True
+        if self.decision_cfg is not None:
+            require_confirmed = bool(self.decision_cfg.temporal_voting.require_confirmed_before_aoa)
 
-        phase_result = estimate_phase_diff(
-            iq_block=iq,
-            ref_channel=0,
-            target_channel=1,
-        )
+        should_run_aoa = (not require_confirmed) or bool(confirmed_status)
+        aoa_skipped_reason = None
 
-        angle_result = phase_diff_to_angle(
-            phase_diff_rad=phase_result.phase_diff_rad,
-            carrier_freq=float(center_freq),
-            antenna_spacing_m=self.antenna_spacing_m,
-            phase_offset_rad=self.phase_offset_rad,
-            clip_input=True,
-        )
+        coherence_value = None
+        coherence_passed = None
+        phase_diff_rad = None
+        phase_diff_deg = None
+        angle_deg = None
+        angle_valid = None
+        sector_index = None
+        sector_label = None
+        sector_valid = None
 
-        sector_result = quantize_front_angle_to_sector(
-            angle_result.angle_deg if angle_result.valid and coherence_result.passed else None,
-            num_sectors=8,
-            min_angle=-90.0,
-            max_angle=90.0,
-        )
+        if should_run_aoa:
+            coherence_result = coherence_gate(
+                z0=branch.rx0.complex_stft,
+                z1=branch.rx1.complex_stft,
+                threshold=self.coherence_threshold,
+                energy_percentile=75.0,
+            )
+
+            phase_result = estimate_phase_diff(
+                iq_block=iq,
+                ref_channel=0,
+                target_channel=1,
+            )
+
+            angle_result = phase_diff_to_angle(
+                phase_diff_rad=phase_result.phase_diff_rad,
+                carrier_freq=float(center_freq),
+                antenna_spacing_m=self.antenna_spacing_m,
+                phase_offset_rad=self.phase_offset_rad,
+                clip_input=True,
+            )
+
+            sector_result = quantize_front_angle_to_sector(
+                angle_result.angle_deg if angle_result.valid and coherence_result.passed else None,
+                num_sectors=8,
+                min_angle=-90.0,
+                max_angle=90.0,
+            )
+
+            coherence_value = float(coherence_result.coherence)
+            coherence_passed = bool(coherence_result.passed)
+            phase_diff_rad = float(phase_result.phase_diff_rad)
+            phase_diff_deg = float(phase_result.phase_diff_deg)
+            angle_deg = float(angle_result.angle_deg)
+            angle_valid = bool(angle_result.valid)
+            sector_index = sector_result.sector_index
+            sector_label = sector_result.sector_label
+            sector_valid = sector_result.valid
+        else:
+            aoa_skipped_reason = "not_confirmed"
 
         return PrecisionAnalysisResult(
             center_freq=float(center_freq),
@@ -295,20 +412,29 @@ class PrecisionAnalyzer:
             cnn_score=cnn_score,
             cnn_class_index=cnn_class_index,
             cnn_probabilities=cnn_probabilities,
-            coherence=float(coherence_result.coherence),
-            coherence_passed=bool(coherence_result.passed),
-            phase_diff_rad=float(phase_result.phase_diff_rad),
-            phase_diff_deg=float(phase_result.phase_diff_deg),
-            angle_deg=float(angle_result.angle_deg),
-            angle_valid=bool(angle_result.valid),
+            coherence=coherence_value,
+            coherence_passed=coherence_passed,
+            phase_diff_rad=phase_diff_rad,
+            phase_diff_deg=phase_diff_deg,
+            angle_deg=angle_deg,
+            angle_valid=angle_valid,
             cnn_spectrogram_shape=list(cnn_spectrogram.shape),
             spectrogram_path=str(spectrogram_path) if spectrogram_path is not None else None,
             rx0_stft_path=str(rx0_stft_path) if rx0_stft_path is not None else None,
             rx1_stft_path=str(rx1_stft_path) if rx1_stft_path is not None else None,
-            sector_index=sector_result.sector_index,
-            sector_label=sector_result.sector_label,
-            sector_valid=sector_result.valid,
+            sector_index=sector_index,
+            sector_label=sector_label,
+            sector_valid=sector_valid,
             precision_blocks=self.precision_blocks,
             selected_block_index=int(best["block_index"]),
             selection_score=float(best["selection_score"]),
+            drone_probability=float(best["selection_score"]),
+            drone_threshold=drone_threshold,
+            temporal_window=int(vote_history.maxlen or len(recent)),
+            drone_vote_count=int(vote_count),
+            temporal_history=[int(x) for x in recent],
+            candidate_status=bool(candidate_status),
+            confirmed_status=bool(confirmed_status),
+            final_decision=final_decision,
+            aoa_skipped_reason=aoa_skipped_reason,
         )
