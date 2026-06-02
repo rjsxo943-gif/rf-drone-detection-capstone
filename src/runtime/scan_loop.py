@@ -11,7 +11,8 @@ from typing import Any
 from src.core.config import load_all_configs
 from src.calibration import load_calibration_params
 from src.runtime.calibration_actions import DEFAULT_NOISE_OUTPUT, DEFAULT_PHASE_GAIN_OUTPUT
-from src.ml.inference import build_cnn_classifier
+from src.ml.runtime_classifier_factory import build_runtime_cnn_classifier
+from src.ml.runtime_decision import RuntimeDecisionConfig, load_runtime_decision_config
 from src.receiver.factory import build_receiver
 from src.scan import FrequencyScanner
 from src.scan.precision_analyzer import PrecisionAnalyzer
@@ -26,6 +27,7 @@ class ScanRuntime:
     receiver: Any
     scanner: FrequencyScanner
     analyzer: PrecisionAnalyzer
+    decision_cfg: RuntimeDecisionConfig | None
 
     run_dir: Path
     precision_dir: Path
@@ -57,6 +59,29 @@ def _unwrap_scan_cfg(scan_cfg_raw: dict[str, Any]) -> dict[str, Any]:
     return scan_cfg_raw
 
 
+def _get_receiver_gain(receiver: Any, receiver_cfg: dict[str, Any]) -> float | None:
+    get_gain = getattr(receiver, "get_gain", None)
+    if callable(get_gain):
+        try:
+            return float(get_gain())
+        except Exception:
+            pass
+
+    if hasattr(receiver, "gain"):
+        try:
+            return float(receiver.gain)
+        except Exception:
+            pass
+
+    if isinstance(receiver_cfg.get("sdr"), dict) and "gain" in receiver_cfg["sdr"]:
+        return float(receiver_cfg["sdr"]["gain"])
+
+    if "gain" in receiver_cfg:
+        return float(receiver_cfg["gain"])
+
+    return None
+
+
 def setup_scan_runtime(
     *,
     config_dir: str | Path = PROJECT_ROOT / "configs",
@@ -64,14 +89,9 @@ def setup_scan_runtime(
     """
     scan에 필요한 객체들을 한 번만 생성한다.
 
-    기존 scripts/run_scan.py에서 매 실행마다 하던 초기화 작업:
-    - config 로드
-    - receiver 생성
-    - FrequencyScanner 생성
-    - CNN classifier 생성
-    - PrecisionAnalyzer 생성
-
-    이걸 loop 밖에서 한 번만 수행한다.
+    원칙:
+    - CNN model path / class_names / threshold / temporal voting은 configs/ml.yaml에서만 읽는다.
+    - runtime code 내부 hardcoded model path를 사용하지 않는다.
     """
     cfg = load_all_configs(config_dir)
 
@@ -81,7 +101,7 @@ def setup_scan_runtime(
     stft_cfg = ml_cfg.get("stft", {})
 
     scan_cfg = _unwrap_scan_cfg(cfg["scan"])
-    
+
     print()
     print("=== SCAN CONFIG DEBUG ===")
     print(f"scan_loop file : {__file__}")
@@ -113,6 +133,7 @@ def setup_scan_runtime(
     precision_dir.mkdir(parents=True, exist_ok=True)
 
     receiver = build_receiver(receiver_cfg)
+    current_gain = _get_receiver_gain(receiver, receiver_cfg)
 
     scanner = FrequencyScanner(
         receiver=receiver,
@@ -126,10 +147,23 @@ def setup_scan_runtime(
     )
 
     cnn_classifier = None
+    decision_cfg = None
 
     if cnn_enabled:
-        cnn_classifier = build_cnn_classifier(ml_cfg)
-
+        decision_cfg = load_runtime_decision_config(ml_cfg)
+        cnn_classifier = build_runtime_cnn_classifier(ml_cfg)
+        print("=== CNN RUNTIME CONFIG ===")
+        print(f"backend        : {decision_cfg.backend}")
+        print(f"model_path     : {decision_cfg.model_path}")
+        print(f"class_names    : {ml_cfg.get('class_names')}")
+        print(f"positive_class : {decision_cfg.positive_class}")
+        print(f"gain           : {current_gain}")
+        print(f"default_thr    : {decision_cfg.default_drone_threshold}")
+        print(f"temporal       : window={decision_cfg.temporal_voting.window_size}, "
+              f"candidate={decision_cfg.temporal_voting.candidate_vote_k}, "
+              f"confirmed={decision_cfg.temporal_voting.confirmed_vote_k}")
+        print("==========================")
+        print()
 
     phase_offset_rad = 0.0
 
@@ -165,6 +199,8 @@ def setup_scan_runtime(
         save_spectrogram=save_spectrogram,
         save_stft=save_stft,
         cnn_classifier=cnn_classifier,
+        decision_cfg=decision_cfg,
+        current_gain=current_gain,
     )
 
     return ScanRuntime(
@@ -172,6 +208,7 @@ def setup_scan_runtime(
         receiver=receiver,
         scanner=scanner,
         analyzer=analyzer,
+        decision_cfg=decision_cfg,
         run_dir=run_dir,
         precision_dir=precision_dir,
         start_freq=start_freq,
@@ -233,13 +270,16 @@ def run_one_scan_cycle(
             print(
                 f"  stft_done={result.stft_done} | "
                 f"cnn={result.cnn_label}({result.cnn_score}) | "
+                f"drone_prob={result.drone_probability} | "
+                f"thr={result.drone_threshold} | "
+                f"votes={result.drone_vote_count}/{result.temporal_window} | "
+                f"candidate={result.candidate_status} | "
+                f"confirmed={result.confirmed_status} | "
+                f"final={result.final_decision} | "
                 f"coherence={result.coherence} | "
                 f"angle={result.angle_deg} deg | "
                 f"sector={result.sector_index}({result.sector_label}) | "
                 f"sel_block={result.selected_block_index}/{result.precision_blocks} | "
-                f"sel_score={result.selection_score} | "
-                f"valid={result.angle_valid} | "
-                f"sector_valid={result.sector_valid} | "
                 f"spectrogram_path={result.spectrogram_path}"
             )
 
@@ -371,4 +411,4 @@ def run_continuous_scan_loop(
         print("=== Continuous Scan Loop Finished ===")
         print(f"cycles: {cycle_index}")
 
-    return 0    
+    return 0
