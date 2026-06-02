@@ -2,34 +2,31 @@
 #
 # CNN / STFT / 모델 저장 경로 설정 파일
 #
+# 원칙:
+# - 모델 경로, 클래스 이름, Drone 판단 임계값, temporal voting 조건은 여기서만 관리한다.
+# - viewer / CLI / runtime 코드는 이 YAML 값을 읽어서 사용한다.
+# - 코드 내부 hardcoded model path / class_names / threshold 사용을 금지한다.
+#
 # 현재 프로젝트 기준:
 # - 전체 처리 단위는 block
 # - 1 block = 16,384 IQ samples
 # - block 하나에서 STFT spectrogram 생성
-# - spectrogram 원본 크기를 CNN 입력으로 사용
-# - resize 64x64는 현재 기본값으로 사용하지 않음
-#
-# 현재 STFT 기준:
-# - nperseg = 512
-# - noverlap = 384
-# - hop_length = 128
-# - block_size = 16384
-# - complex STFT shape = 512 x 125
-#
-# CNN 입력 기준:
-# - RX0 또는 RX1 중 하나를 선택
-# - 기본은 RX0 사용
-# - CNN 입력 shape = 512 x 125 x 1
+# - runtime CNN은 Drone / NotDrone 2-class binary 모델 사용
 
 block_size: 16384
 
-num_classes: 4
+# ============================================================
+# Class definition
+# ============================================================
+
+num_classes: 2
 
 class_names:
-  - Background
-  - WiFi
-  - Bluetooth
-  - Drone-like
+  - NotDrone
+  - Drone
+
+negative_class: NotDrone
+positive_class: Drone
 
 # CNN branch에서 사용할 RX 채널 선택
 # Pluto+ 2채널 입력 shape = (2, 16384)
@@ -38,45 +35,46 @@ class_names:
 cnn_input:
   rx_index: 0
 
+# ============================================================
+# STFT / Spectrogram
+# ============================================================
+
 stft:
-  nperseg: 128  # 128 or 512
-  noverlap: 96 # 96 or 384
-  hop_length: 32 # nperseg - noverlap
-  nfft: 128 # nperseg와 같게 설정하는 것을 권장, 128 또는 512
+  nperseg: 128
+  noverlap: 96
+  hop_length: 32
+  nfft: 128
   window: hann
 
-  # complex IQ STFT 기준
-  # 현재 check_stage1_coherence.py 결과:
-  # complex STFT shape = (512, 125)
-  expected_freq_bins: 128  # 128 or 512
-  expected_time_frames: 509   # 509 or 125
+  expected_freq_bins: 128
+  expected_time_frames: 509
 
-  # 복소 IQ 신호이므로 양방향 주파수 bin을 사용
-  # 즉, 257 bins가 아니라 512 bins 사용
+  # 복소 IQ 신호이므로 양방향 주파수 bin 사용
   onesided: false
 
-  # 주파수 0Hz 성분을 가운데로 정렬할지 여부
+  # 주파수 0Hz 성분을 가운데로 정렬
   fftshift: true
 
 spectrogram:
-  # 현재 CNN 입력 기준
-  image_height: 128   # 128 or 512
-  image_width: 509    # 509 or 125
+  image_height: 128
+  image_width: 509
   input_channels: 1
-  input_shape: [128, 509, 1]  # [128, 509, 1] or [512, 125, 1]
+  input_shape: [128, 509, 1]
 
-  # 현재는 원본 STFT 크기 사용
   resize: false
-
-  # STFT magnitude 또는 power를 log scale로 변환
   use_log_scale: true
-
-  # spectrogram 정규화
   normalize: true
   normalize_method: minmax
 
+# ============================================================
+# Model
+# ============================================================
+
 model:
-  type: 2d_cnn
+  type: binary_2d_cnn
+  binary_model_path: outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt
+
+  # legacy / unused paths. 유지하되 runtime에서는 inference.model_path를 우선 사용한다.
   model_path: models/checkpoints/model.keras
   best_model_path: models/checkpoints/best_model.keras
   torch_model_path: models/checkpoints/model_torch.pth
@@ -93,25 +91,57 @@ export:
   tflite_path: models/tflite/model.tflite
   quantize: false
 
+# ============================================================
+# Runtime inference / decision policy
+# ============================================================
+
 inference:
-  backend: rf4
-  model_path: outputs/ml/rf4_cnn_live_gain15_v1/best_model.pt
+  # Drone / NotDrone binary classifier
+  backend: binary_flat
+  model_path: outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt
   device: cpu
+
+  # fallback threshold. gain별 policy에 매칭되지 않으면 이 값을 사용한다.
+  drone_threshold: 0.50
   general_threshold: 0.50
-  drone_threshold: 0.70
 
+  # ----------------------------------------------------------
+  # Gain-dependent Drone threshold policy
+  # ----------------------------------------------------------
+  # gain < 25        -> 0.50
+  # 25 <= gain < 30  -> 0.35
+  # gain >= 30       -> 0.80
+  # ----------------------------------------------------------
+  gain_threshold_policy:
+    enabled: true
+    default_drone_threshold: 0.50
 
+    rules:
+      - name: gain_25_sensitive
+        min_gain: 25
+        max_gain: 29.999
+        drone_threshold: 0.35
 
-#inference:
-#  backend: torch   # dummy, keras, torch
-#  model_path: outputs/ml/rf4_cnn_live2450_v2/best_model.pt
-#  model_arch: legacy_rf4_live2450
-#  device: cpu
-#  dummy_class_name: Background
-#  dummy_confidence: 0.0
+      - name: gain_30_or_higher_strict
+        min_gain: 30
+        max_gain: null
+        drone_threshold: 0.80
 
-#inference:
-#  backend: keras
-#  dummy_class_name: Background
-#  dummy_confidence: 0.0
-#나중에 모델 다만들면 이렇게 바꾸기 
+  # ----------------------------------------------------------
+  # Temporal voting
+  # ----------------------------------------------------------
+  # 단일 block만 보고 Drone 확정하지 않는다.
+  # 최근 5개 precision/viewer decision 중:
+  # - 2개 이상 Drone이면 candidate
+  # - 3개 이상 Drone이면 confirmed
+  # AoA는 confirmed 이후에만 실행한다.
+  # ----------------------------------------------------------
+  temporal_voting:
+    enabled: true
+    window_size: 5
+    candidate_vote_k: 2
+    confirmed_vote_k: 3
+    positive_class: Drone
+    negative_class: NotDrone
+    require_confirmed_before_aoa: true
+    reject_to_scan: true
