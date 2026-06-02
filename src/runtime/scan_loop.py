@@ -44,6 +44,8 @@ class ScanRuntime:
     cnn_enabled: bool
     save_spectrogram: bool
     save_stft: bool
+    scan_cfg: dict[str, Any]
+    precision_hold_cfg: dict[str, Any]
 
     def close(self) -> None:
         close_fn = getattr(self.receiver, "close", None)
@@ -90,14 +92,6 @@ def setup_scan_runtime(
     *,
     config_dir: str | Path = PROJECT_ROOT / "configs",
 ) -> ScanRuntime:
-    """
-    scan에 필요한 객체들을 한 번만 생성한다.
-
-    원칙:
-    - CNN model path / class_names / threshold / temporal voting은 configs/ml.yaml에서만 읽는다.
-    - AoA geometry / coherence / smoothing / sector는 configs/aoa.yaml에서만 읽는다.
-    - runtime code 내부 hardcoded model path / AoA threshold 사용을 금지한다.
-    """
     cfg = load_all_configs(config_dir)
 
     receiver_cfg = cfg["receiver"]
@@ -109,6 +103,7 @@ def setup_scan_runtime(
     smoothing_cfg = aoa_cfg.get("smoothing", {}) or {}
 
     scan_cfg = _unwrap_scan_cfg(cfg["scan"])
+    precision_hold_cfg = scan_cfg.get("precision_hold", {}) or {}
 
     print()
     print("=== SCAN CONFIG DEBUG ===")
@@ -244,7 +239,140 @@ def setup_scan_runtime(
         cnn_enabled=cnn_enabled,
         save_spectrogram=save_spectrogram,
         save_stft=save_stft,
+        scan_cfg=scan_cfg,
+        precision_hold_cfg=precision_hold_cfg,
     )
+
+
+def _set_analyzer_precision_blocks(analyzer: PrecisionAnalyzer, value: int) -> int:
+    previous = int(analyzer.precision_blocks)
+    analyzer.precision_blocks = max(1, int(value))
+    return previous
+
+
+def _reset_aoa_smoothing_if_available(analyzer: PrecisionAnalyzer) -> None:
+    history = getattr(analyzer, "angle_history", None)
+    if history is not None and hasattr(history, "clear"):
+        history.clear()
+
+
+def run_precision_hold(
+    runtime: ScanRuntime,
+    *,
+    center_freq: float,
+    cycle_index: int,
+    trigger_event: Any,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    cfg = runtime.precision_hold_cfg
+    if not bool(cfg.get("enabled", False)):
+        result = runtime.analyzer.analyze(center_freq)
+        return {
+            "enabled": False,
+            "center_freq": float(center_freq),
+            "reason": "disabled",
+            "results": [asdict(result)],
+            "final_result": asdict(result),
+        }
+
+    min_hold = max(0, int(cfg.get("min_hold_decisions", 3)))
+    max_hold = max(1, int(cfg.get("max_hold_decisions", 20)))
+    lost_grace = max(0, int(cfg.get("lost_grace_decisions", 4)))
+    blocks_per_decision = max(1, int(cfg.get("precision_blocks_per_decision", runtime.analyzer.precision_blocks)))
+    require_confirmed_once = bool(cfg.get("require_confirmed_once_before_grace_exit", False))
+    treat_candidate_alive = bool(cfg.get("treat_candidate_as_alive", True))
+    decision_delay_sec = float(cfg.get("decision_delay_sec", 0.0))
+
+    previous_blocks = _set_analyzer_precision_blocks(runtime.analyzer, blocks_per_decision)
+    if bool(cfg.get("reset_aoa_smoothing_on_enter", True)):
+        _reset_aoa_smoothing_if_available(runtime.analyzer)
+
+    if verbose:
+        print(
+            f"\n[PRECISION_HOLD ENTER] cf={center_freq / 1e9:.6f} GHz | "
+            f"min={min_hold} max={max_hold} grace={lost_grace} "
+            f"blocks/decision={blocks_per_decision}"
+        )
+
+    results: list[dict[str, Any]] = []
+    lost_count = 0
+    confirmed_once = False
+    exit_reason = "max_hold_reached"
+
+    try:
+        for hold_index in range(max_hold):
+            result = runtime.analyzer.analyze(center_freq)
+            result_dict = asdict(result)
+            result_dict["hold_index"] = hold_index
+            result_dict["hold_center_freq"] = float(center_freq)
+            results.append(result_dict)
+
+            confirmed = bool(result.confirmed_status)
+            candidate = bool(result.candidate_status)
+            alive = confirmed or (treat_candidate_alive and candidate)
+
+            if confirmed:
+                confirmed_once = True
+
+            if alive:
+                lost_count = 0
+            else:
+                lost_count += 1
+
+            if verbose:
+                print(
+                    f"  [HOLD {hold_index + 1:03d}/{max_hold}] "
+                    f"cnn={result.cnn_label} prob={result.drone_probability} "
+                    f"thr={result.drone_threshold} votes={result.drone_vote_count}/{result.temporal_window} "
+                    f"cand={result.candidate_status} conf={result.confirmed_status} "
+                    f"lost={lost_count}/{lost_grace} "
+                    f"angle={result.angle_deg} smooth={result.aoa_smoothed_angle_deg} "
+                    f"sector={result.sector_index} final={result.final_decision}"
+                )
+
+            if hold_index + 1 < min_hold:
+                if decision_delay_sec > 0:
+                    time.sleep(decision_delay_sec)
+                continue
+
+            if require_confirmed_once and not confirmed_once:
+                if decision_delay_sec > 0:
+                    time.sleep(decision_delay_sec)
+                continue
+
+            if lost_count > lost_grace:
+                exit_reason = "lost_grace_exceeded"
+                break
+
+            if decision_delay_sec > 0:
+                time.sleep(decision_delay_sec)
+
+    finally:
+        runtime.analyzer.precision_blocks = previous_blocks
+
+    final_result = results[-1] if results else None
+
+    if verbose:
+        print(
+            f"[PRECISION_HOLD EXIT] cf={center_freq / 1e9:.6f} GHz | "
+            f"decisions={len(results)} confirmed_once={confirmed_once} reason={exit_reason}"
+        )
+
+    return {
+        "enabled": True,
+        "center_freq": float(center_freq),
+        "cycle_index": int(cycle_index),
+        "trigger": asdict(trigger_event),
+        "min_hold_decisions": min_hold,
+        "max_hold_decisions": max_hold,
+        "lost_grace_decisions": lost_grace,
+        "precision_blocks_per_decision": blocks_per_decision,
+        "confirmed_once": bool(confirmed_once),
+        "exit_reason": exit_reason,
+        "num_decisions": len(results),
+        "results": results,
+        "final_result": final_result,
+    }
 
 
 def run_one_scan_cycle(
@@ -266,6 +394,7 @@ def run_one_scan_cycle(
 
         if not event.triggered:
             event_dict["analysis"] = None
+            event_dict["precision_hold"] = None
             event_dicts.append(event_dict)
             continue
 
@@ -276,30 +405,16 @@ def run_one_scan_cycle(
                 f"pass_count={event.pass_count}/{runtime.scan_blocks}"
             )
 
-        result = runtime.analyzer.analyze(event.center_freq)
-        analysis_dict = asdict(result)
-
-        event_dict["analysis"] = analysis_dict
+        hold = run_precision_hold(
+            runtime,
+            center_freq=event.center_freq,
+            cycle_index=cycle_index,
+            trigger_event=event,
+            verbose=verbose,
+        )
+        event_dict["precision_hold"] = hold
+        event_dict["analysis"] = hold.get("final_result")
         event_dicts.append(event_dict)
-
-        if verbose:
-            print(
-                f"  stft_done={result.stft_done} | "
-                f"cnn={result.cnn_label}({result.cnn_score}) | "
-                f"drone_prob={result.drone_probability} | "
-                f"thr={result.drone_threshold} | "
-                f"votes={result.drone_vote_count}/{result.temporal_window} | "
-                f"candidate={result.candidate_status} | "
-                f"confirmed={result.confirmed_status} | "
-                f"final={result.final_decision} | "
-                f"coherence={result.coherence} | "
-                f"angle={result.angle_deg} deg | "
-                f"smooth={result.aoa_smoothed_angle_deg} deg "
-                f"smooth_valid={result.aoa_smoothing_valid} | "
-                f"sector={result.sector_index}({result.sector_label}) | "
-                f"sel_block={result.selected_block_index}/{result.precision_blocks} | "
-                f"spectrogram_path={result.spectrogram_path}"
-            )
 
     save_scan_events(
         event_dicts,
