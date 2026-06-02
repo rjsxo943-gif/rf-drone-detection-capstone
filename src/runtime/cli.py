@@ -5,7 +5,6 @@ from pathlib import Path
 import re
 
 from src.runtime.cnn_capture_actions import run_cnn_capture_action
-from src.runtime.scan_actions import run_scan_action
 from src.runtime.rf4_actions import run_rf4_single_block_action
 from src.calibration import (
     load_gain_noise_calibration,
@@ -19,6 +18,15 @@ from src.runtime.calibration_actions import (
     run_gain_wise_noise_calibration_action,
     run_gain_wise_phase_gain_calibration_action,
 )
+
+
+EXIT_COMMANDS = {"q", "quit", "exit", "shutdown"}
+STATUS_COMMANDS = {"c", "status"}
+NOISE_COMMANDS = {"n", "noise"}
+PHASE_COMMANDS = {"p", "phase", "phase_gain"}
+PIPELINE_COMMANDS = {"s", "start", "run", "pipeline", "a", "aoa"}
+CAPTURE_COMMANDS = {"d", "dataset", "capture"}
+RF4_COMMANDS = {"r", "rf4"}
 
 
 def _format_exists(path: Path) -> str:
@@ -50,11 +58,20 @@ def _ask_int(prompt: str, default: int) -> int:
 
 
 def print_calibration_status() -> None:
+    """
+    현재 runtime 시작 전 상태창 역할.
+
+    확인 항목:
+    - gain-wise noise calibration 존재 여부
+    - gain-wise phase/gain calibration 존재 여부
+    - gain별 threshold / raw safety profile
+    - gain별 phase offset / coherence profile
+    """
     noise_path = Path(DEFAULT_GAIN_NOISE_OUTPUT)
     phase_gain_path = Path(DEFAULT_GAIN_PHASE_GAIN_OUTPUT)
 
     print()
-    print("=== Gain-wise Calibration Status ===")
+    print("=== Runtime Calibration / Pipeline Status ===")
     print(f"noise_by_gain profile      : {_format_exists(noise_path)}")
     print(f"phase_gain_by_gain profile : {_format_exists(phase_gain_path)}")
 
@@ -76,6 +93,8 @@ def print_calibration_status() -> None:
                 )
         except Exception as e:
             print(f"[WARN] gain-wise noise status load failed: {e}")
+    else:
+        print("[WARN] noise calibration이 아직 없습니다. 먼저 [n]을 권장합니다.")
 
     if phase_gain_path.exists():
         try:
@@ -94,19 +113,150 @@ def print_calibration_status() -> None:
                 )
         except Exception as e:
             print(f"[WARN] gain-wise phase/gain status load failed: {e}")
+    else:
+        print("[WARN] phase/gain calibration이 아직 없습니다. AoA 신뢰도 확보 전에는 [p]를 권장합니다.")
 
     print()
+
 
 def print_menu() -> None:
     print()
     print("=== RF Drone Detection Runtime CLI ===")
-    print("[c] gain-wise calibration status")
-    print("[n] gain-wise noise calibration")
-    print("[p] gain-wise phase/gain calibration")
-    print("[s] start")
-    print("[r] RF4 single block inference")
-    print("[a] AoA sector scan")
-    print("[q] quit")
+    print("[c] status        : calibration / pipeline 현재 상태창")
+    print("[n] noise         : gain-wise noise calibration")
+    print("[p] phase         : gain-wise phase/gain calibration")
+    print("[s] start         : integrated scan/runtime pipeline 구동")
+    print("[d] dataset       : CNN dataset capture")
+    print("[r] rf4           : RF4 single block inference")
+    print("[q] quit/shutdown : receiver close 후 종료")
+
+
+def _run_pipeline_start_action() -> None:
+    print()
+    print("=== Integrated Scan/Runtime Pipeline Start ===")
+    print("흐름: Scan → Candidate → Precision CNN → Coherence/AoA/Sector → Logging")
+    print("중단: scan cycle 사이에 q 입력 후 Enter, 또는 Ctrl+C")
+    print()
+    print_calibration_status()
+
+    try:
+        return_code = run_continuous_scan_loop(
+            stop_key="q",
+            cycle_delay_sec=0.0,
+            verbose=True,
+        )
+
+        if return_code != 0:
+            print(f"[WARN] runtime pipeline finished with non-zero return code: {return_code}")
+
+    except Exception as e:
+        print(f"[ERROR] runtime pipeline failed: {e}")
+
+
+def _run_cnn_dataset_capture_action() -> None:
+    print()
+    print("=== Start CNN Dataset Capture ===")
+    print("신호원을 켜둔 상태에서 label을 직접 입력하면,")
+    print("스캔으로 잡힌 후보 신호를 CNN 학습용 spectrogram으로 저장한다.")
+    print()
+
+    label = input("label ex) wifi / bluetooth / drone_like / background > ").strip()
+
+    max_saved_text = input("max_saved [default=50] > ").strip()
+    max_saved = int(max_saved_text) if max_saved_text else 50
+
+    rx_index_text = input("rx_index [default=0] > ").strip()
+    rx_index = int(rx_index_text) if rx_index_text else 0
+
+    save_raw_text = input("save raw iq? [y/N] > ").strip().lower()
+    save_raw_iq = save_raw_text in ("y", "yes")
+
+    print()
+    print("=== Capture Config ===")
+    print(f"label       : {label}")
+    print(f"max_saved   : {max_saved}")
+    print(f"rx_index    : {rx_index}")
+    print(f"save_raw_iq : {save_raw_iq}")
+    print()
+
+    try:
+        return_code = run_cnn_capture_action(
+            label=label,
+            max_saved=max_saved,
+            rx_index=rx_index,
+            save_raw_iq=save_raw_iq,
+            require_noise=True,
+            require_phase_gain=False,
+            stop_key="q",
+            cycle_delay_sec=0.0,
+            verbose=True,
+        )
+
+        if return_code != 0:
+            print(f"[WARN] capture finished with non-zero return code: {return_code}")
+
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        print("먼저 [n] gain-wise noise calibration을 실행해야 한다.")
+
+    except Exception as e:
+        print(f"[ERROR] cnn capture action failed: {e}")
+
+
+def _run_rf4_single_block_inference_action() -> None:
+    print()
+    print("=== RF4 Single Block Inference ===")
+
+    model_path = input(
+        "model path [default=outputs/ml/rf4_cnn_live2450_v2/best_model.pt] > "
+    ).strip()
+    if not model_path:
+        model_path = "outputs/ml/rf4_cnn_live2450_v2/best_model.pt"
+
+    center_freq_text = input("center_freq Hz [default=2437000000] > ").strip()
+    center_freq = int(center_freq_text) if center_freq_text else 2_437_000_000
+
+    rx_index_text = input("rx_index [default=0] > ").strip()
+    rx_index = int(rx_index_text) if rx_index_text else 0
+
+    general_threshold_text = input("general_threshold [default=0.50] > ").strip()
+    general_threshold = (
+        float(general_threshold_text) if general_threshold_text else 0.50
+    )
+
+    drone_threshold_text = input("drone_threshold [default=0.70] > ").strip()
+    drone_threshold = (
+        float(drone_threshold_text) if drone_threshold_text else 0.70
+    )
+
+    num_blocks_text = input("num_blocks [default=10] > ").strip()
+    num_blocks = int(num_blocks_text) if num_blocks_text else 10
+
+    min_drone_votes_text = input("min_drone_votes [default=3] > ").strip()
+    min_drone_votes = (
+        int(min_drone_votes_text) if min_drone_votes_text else 3
+    )
+
+    try:
+        return_code = run_rf4_single_block_action(
+            model_path=model_path,
+            center_freq=center_freq,
+            rx_index=rx_index,
+            general_threshold=general_threshold,
+            drone_threshold=drone_threshold,
+            num_blocks=num_blocks,
+            min_drone_votes=min_drone_votes,
+        )
+
+        if return_code != 0:
+            print(f"[WARN] RF4 inference finished with non-zero return code: {return_code}")
+
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+
+    except Exception as e:
+        print(f"[ERROR] RF4 inference failed: {e}")
+
 
 def run_cli() -> None:
     print_calibration_status()
@@ -118,17 +268,17 @@ def run_cli() -> None:
             cmd = input("select> ").strip().lower()
         except KeyboardInterrupt:
             print()
-            print("exit runtime cli")
+            print("shutdown runtime cli")
             break
 
-        if cmd == "q":
-            print("exit runtime cli")
+        if cmd in EXIT_COMMANDS:
+            print("shutdown runtime cli")
             break
 
-        elif cmd == "c":
+        elif cmd in STATUS_COMMANDS:
             print_calibration_status()
 
-        elif cmd == "n":
+        elif cmd in NOISE_COMMANDS:
             print()
             print("=== Run Gain-wise Noise Calibration ===")
             print("주의: 드론/조종기/와이파이 신호원을 최대한 끄고 배경 noise만 받는 상태에서 진행한다.")
@@ -138,8 +288,9 @@ def run_cli() -> None:
                 gain_list=gain_list,
                 num_blocks_per_gain=num_blocks,
             )
+            print_calibration_status()
 
-        elif cmd == "p":
+        elif cmd in PHASE_COMMANDS:
             print()
             print("=== Run Gain-wise Phase/Gain Calibration ===")
             print("주의: 기준 신호원을 두 안테나 정면 0도 방향에 두고 진행한다.")
@@ -149,136 +300,23 @@ def run_cli() -> None:
                 gain_list=gain_list,
                 num_blocks_per_gain=num_blocks,
             )
+            print_calibration_status()
 
-        elif cmd == "a":
-            print()
-            print("=== AoA Sector Scan Start ===")
-            print("PrecisionAnalyzer 기반 scan loop를 실행한다.")
-            print("angle_deg와 8-sector 방향을 함께 출력한다.")
-            print("scan cycle 사이에 q 입력 후 Enter를 누르면 중단한다.")
-            print()
+        elif cmd in PIPELINE_COMMANDS:
+            _run_pipeline_start_action()
 
-            try:
-                return_code = run_continuous_scan_loop(
-                    stop_key="q",
-                    cycle_delay_sec=0.0,
-                    verbose=True,
-                )
+        elif cmd in CAPTURE_COMMANDS:
+            _run_cnn_dataset_capture_action()
 
-                if return_code != 0:
-                    print(f"[WARN] AoA sector scan finished with non-zero return code: {return_code}")
-
-            except Exception as e:
-                print(f"[ERROR] AoA sector scan failed: {e}")
-
-        elif cmd == "s":
-            print()
-            print("=== Start CNN Dataset Capture ===")
-            print("신호원을 켜둔 상태에서 label을 직접 입력하면,")
-            print("스캔으로 잡힌 후보 신호를 CNN 학습용 spectrogram으로 저장한다.")
-            print()
-
-            label = input("label ex) wifi / bluetooth / drone_like / background > ").strip()
-
-            max_saved_text = input("max_saved [default=50] > ").strip()
-            max_saved = int(max_saved_text) if max_saved_text else 50
-
-            rx_index_text = input("rx_index [default=0] > ").strip()
-            rx_index = int(rx_index_text) if rx_index_text else 0
-
-            save_raw_text = input("save raw iq? [y/N] > ").strip().lower()
-            save_raw_iq = save_raw_text in ("y", "yes")
-
-            print()
-            print("=== Capture Config ===")
-            print(f"label       : {label}")
-            print(f"max_saved   : {max_saved}")
-            print(f"rx_index    : {rx_index}")
-            print(f"save_raw_iq : {save_raw_iq}")
-            print()
-
-            try:
-                return_code = run_cnn_capture_action(
-                    label=label,
-                    max_saved=max_saved,
-                    rx_index=rx_index,
-                    save_raw_iq=save_raw_iq,
-                    require_noise=True,
-                    require_phase_gain=False,
-                    stop_key="q",
-                    cycle_delay_sec=0.0,
-                    verbose=True,
-                )
-
-                if return_code != 0:
-                    print(f"[WARN] capture finished with non-zero return code: {return_code}")
-
-            except FileNotFoundError as e:
-                print(f"[ERROR] {e}")
-                print("먼저 [n] gain-wise noise calibration을 실행해야 한다.")
-
-            except Exception as e:
-                print(f"[ERROR] cnn capture action failed: {e}")
-
-
-        elif cmd == "r":
-            print()
-            print("=== RF4 Single Block Inference ===")
-
-            model_path = input(
-                "model path [default=outputs/ml/rf4_cnn_live2450_v2/best_model.pt] > "
-            ).strip()
-            if not model_path:
-                model_path = "outputs/ml/rf4_cnn_live2450_v2/best_model.pt"
-
-            center_freq_text = input("center_freq Hz [default=2437000000] > ").strip()
-            center_freq = int(center_freq_text) if center_freq_text else 2_437_000_000
-
-            rx_index_text = input("rx_index [default=0] > ").strip()
-            rx_index = int(rx_index_text) if rx_index_text else 0
-
-            general_threshold_text = input("general_threshold [default=0.50] > ").strip()
-            general_threshold = (
-                float(general_threshold_text) if general_threshold_text else 0.50
-            )
-
-            drone_threshold_text = input("drone_threshold [default=0.70] > ").strip()
-            drone_threshold = (
-                float(drone_threshold_text) if drone_threshold_text else 0.70
-            )
-
-            num_blocks_text = input("num_blocks [default=10] > ").strip()
-            num_blocks = int(num_blocks_text) if num_blocks_text else 10
-
-            min_drone_votes_text = input("min_drone_votes [default=3] > ").strip()
-            min_drone_votes = (
-                int(min_drone_votes_text) if min_drone_votes_text else 3
-            )
-
-            try:
-                return_code = run_rf4_single_block_action(
-                    model_path=model_path,
-                    center_freq=center_freq,
-                    rx_index=rx_index,
-                    general_threshold=general_threshold,
-                    drone_threshold=drone_threshold,
-                    num_blocks=num_blocks,
-                    min_drone_votes=min_drone_votes,
-                )
-
-                if return_code != 0:
-                    print(f"[WARN] RF4 inference finished with non-zero return code: {return_code}")
-
-            except FileNotFoundError as e:
-                print(f"[ERROR] {e}")
-
-            except Exception as e:
-                print(f"[ERROR] RF4 inference failed: {e}")
+        elif cmd in RF4_COMMANDS:
+            _run_rf4_single_block_inference_action()
 
         elif cmd == "":
             continue
 
         else:
             print(f"unknown command: {cmd}")
+
+
 if __name__ == "__main__":
     run_cli()
