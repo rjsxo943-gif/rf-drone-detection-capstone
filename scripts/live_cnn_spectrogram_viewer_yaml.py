@@ -162,6 +162,27 @@ def _build_viewer_thresholds_from_yaml(
     )
 
 
+def _initialize_display_window(
+    plt: Any,
+    image_handle: Any,
+    text_handle: Any,
+    nfft: int,
+) -> tuple[Any, Any]:
+    """Create a visible placeholder image before the first real RF frame arrives."""
+    placeholder = np.zeros((int(nfft), 2), dtype=np.float32)
+    image_handle, text_handle = update_display(
+        plt,
+        image_handle,
+        text_handle,
+        placeholder,
+        "YAML Live CNN Spectrogram | starting...",
+        "waiting for first RF block...",
+    )
+    plt.show(block=False)
+    plt.pause(0.2)
+    return image_handle, text_handle
+
+
 def main() -> None:
     args = parse_args()
     receiver_cfg, ml_cfg = load_viewer_configs(args)
@@ -213,9 +234,14 @@ def main() -> None:
     print(f"temporal           : window={voting_cfg.window_size}, candidate={voting_cfg.candidate_vote_k}, confirmed={voting_cfg.confirmed_vote_k}")
     print(f"raw_safety         : no_signal={thresholds.no_signal_ratio}, valid={thresholds.valid_signal_ratio}, overload_peak={thresholds.overload_peak}, clip_ratio={thresholds.overload_clip_ratio}")
     print("note               : model/threshold/voting/raw_safety are loaded from configs/ml.yaml")
-    print("Press Ctrl+C to stop.")
 
     plt = prepare_matplotlib(args.no_display)
+    backend = str(plt.get_backend())
+    print(f"matplotlib_backend : {backend}")
+    if "agg" in backend.lower() and not args.no_display:
+        print("[DISPLAY WARN] Matplotlib backend is non-interactive. Use --save-latest or install/use a GUI backend.")
+    print("Press Ctrl+C to stop.")
+
     image_handle = None
     text_handle = None
     if not args.no_display:
@@ -245,6 +271,12 @@ def main() -> None:
             initial_gain=float(gain),
             initial_distance=args.distance_m,
             initial_memo=args.memo,
+        )
+        image_handle, text_handle = _initialize_display_window(
+            plt,
+            image_handle,
+            text_handle,
+            nfft=nfft,
         )
 
     update_index = 0
@@ -405,6 +437,8 @@ def main() -> None:
                 image_handle, text_handle = update_display(
                     plt, image_handle, text_handle, spec, title, side_text
                 )
+                plt.gcf().canvas.draw_idle()
+                plt.gcf().canvas.flush_events()
             if args.save_latest:
                 save_latest_image(plt, latest_image_dir, spec, title, side_text)
 
