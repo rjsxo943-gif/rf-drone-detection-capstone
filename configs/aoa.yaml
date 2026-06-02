@@ -2,34 +2,32 @@
 #
 # AoA(Angle of Arrival, 도래각) 계산 설정 파일
 #
+# 원칙:
+# - AoA 채널, 안테나 간격, coherence, phase/gain calibration, smoothing 조건은 여기서 관리한다.
+# - CNN 모델/임계값/temporal voting은 configs/ml.yaml에서 관리한다.
+# - AoA는 단일 CNN raw 판정이 아니라 Drone confirmed 이후에만 실행하는 구조를 기본으로 한다.
+#
 # 현재 프로젝트 기준:
 # - Pluto+ RX0/RX1 두 채널 사용
-# - CNN이 Drone-like confidence threshold를 통과한 경우에만 AoA 계산
-# - RX0/RX1의 같은 block_index에 해당하는 IQ block으로 위상차 계산
 # - 1 block = 16,384 samples
-# - 중심 주파수는 2.4 GHz 기준
-# - 안테나 간격은 λ/2 = 0.0625 m 기준
+# - 중심 주파수는 receiver.yaml 또는 CLI center_freq를 우선 사용
+# - 안테나 간격은 실측값 기준으로 관리한다.
 
-# 처리 단위
+# ============================================================
+# Basic AoA geometry
+# ============================================================
+
 block_size: 16384
 
-# 중심 주파수
-carrier_freq: 2400000000
+# fallback carrier frequency.
+# 실제 live runtime에서는 receiver.center_freq / CLI center_freq를 우선 사용한다.
+carrier_freq: 2450000000
 
-# 전파 속도
 speed_of_light: 300000000
 
-# 2.4GHz에서 파장:
-# wavelength = speed_of_light / carrier_freq
-#            = 0.125 m
-wavelength_m: 0.125
-
-# 안테나 간격
-# 2.4GHz 기준 λ/2 = 0.0625 m
+# 안테나 간격.
+# 기존 0.06 m 기준. 실제 배열 간격을 바꾸면 여기만 수정한다.
 antenna_spacing_m: 0.06
-
-# AoA 계산 방식
-method: phase_difference
 
 # 사용할 채널
 # ref_channel = RX0
@@ -37,42 +35,143 @@ method: phase_difference
 ref_channel: 0
 target_channel: 1
 
-# RX0/RX1 채널 간 고정 위상 오차 보정값
-# 실제 측정 전에는 0으로 둔다.
-# 나중에 calibrate.py 또는 phaseoffset.py로 기준 신호를 측정해서 업데이트한다.
-phase_offset_rad: 0.0
+# AoA 계산 방식
+method: phase_difference
 
 # 위상차 계산 후 -pi ~ pi 범위로 정리할지 여부
 wrap_phase: true
 
 # arcsin 입력값이 -1~1 범위를 넘지 않도록 clipping
-# 실제 잡음이나 위상 오차 때문에 범위를 살짝 넘을 수 있음
 clip_arcsin_input: true
 
 # AoA 출력 단위
 output_unit: degree
 
 # 각도 제한
-# d = λ/2인 2채널 구조에서는 보통 -90도 ~ +90도 범위로 해석
 angle_min_deg: -90
 angle_max_deg: 90
 
-# CNN 결과와 연결할 AoA 계산 gate
-# Drone-like 확률이 threshold 이상일 때만 AoA branch를 실행한다.
+# ============================================================
+# AoA execution gate
+# ============================================================
+# 현재 CNN은 Drone / NotDrone binary 모델이며,
+# Drone 확정은 configs/ml.yaml의 temporal_voting 결과를 따른다.
+# 따라서 AoA는 raw CNN probability가 아니라 confirmed 상태 이후 실행한다.
+
 gate:
   enabled: true
-  target_class: Drone-like
-  confidence_threshold: 0.85
 
-# RX0/RX1 coherence 확인 설정
-# AoA gate를 통과했더라도 coherence가 너무 낮으면 AoA 결과를 신뢰하기 어렵다.
+  # 권장 runtime 조건:
+  # - cnn_confirmed: temporal voting confirmed 이후 AoA 실행
+  # - always: AoA 디버깅용으로 항상 실행
+  mode: cnn_confirmed
+
+  # binary class 기준
+  target_class: Drone
+
+  # legacy fallback용.
+  # 현재 구조에서는 ml.yaml의 gain_threshold_policy / temporal_voting이 우선이다.
+  confidence_threshold: 0.80
+
+  require_temporal_confirmed: true
+  reject_if_not_confirmed: true
+
+# ============================================================
+# Phase / gain calibration
+# ============================================================
+# phase_gain_by_gain_latest.json은 gain별 보정값을 저장한다.
+# live_rf_viewer.py / AoARuntime은 gain이 바뀔 때 해당 gain의 보정값을 적용한다.
+
+calibration:
+  enabled: true
+
+  # 단일 phase offset fallback
+  phase_offset_rad: 0.0
+  phase_offset_deg: 0.0
+
+  # 최신 gain별 phase/gain calibration 파일
+  phase_gain_profile: outputs/calibration/phase_gain_by_gain_latest.json
+
+  # legacy fallback 파일. 없으면 무시한다.
+  phase_calibration_json: null
+  gain_phase_table_json: null
+
+  allow_nearest_gain: true
+
+  # 품질이 낮은 보정값을 사용할지 여부.
+  # 초기에는 현장 테스트 우선이라 false로 강제 차단하지 않는다.
+  require_good_quality: false
+
+# RX0/RX1 채널 간 고정 위상 오차 보정값 fallback
+# calibration.phase_gain_profile이 있으면 gain별 보정값이 우선한다.
+phase_offset_rad: 0.0
+
+# ============================================================
+# Coherence check
+# ============================================================
+# AoA 결과가 신뢰 가능한지 판단하기 위한 RX0/RX1 coherence 조건.
+
 coherence:
   enabled: true
   threshold: 0.60
+  energy_percentile: 75.0
 
-# AoA smoothing 설정
-# block 단위 AoA가 너무 흔들릴 수 있으므로 최근 N개 block 결과를 평균/중앙값 처리
+  # true이면 coherence 실패 시 angle은 계산하더라도 invalid/reject 취급한다.
+  require_passed_for_valid_angle: true
+
+# ============================================================
+# AoA smoothing
+# ============================================================
+# 단일 block AoA는 멀티패스/순간 위상 흔들림 때문에 튈 수 있으므로
+# 최근 N개 angle을 기반으로 중앙값/평균 smoothing한다.
+
 smoothing:
   enabled: true
+
+  # median: 튀는 angle에 강함. 현장 테스트 기본값.
+  # mean: 신호가 안정적일 때 부드러움.
   method: median
+
   window_size: 5
+
+  # smoothing 입력 조건
+  require_angle_valid: true
+  require_coherence_passed: true
+
+  # 갑자기 튀는 angle을 smoothing history에 넣지 않기 위한 기본 제한.
+  # null이면 제한하지 않는다.
+  max_angle_jump_deg: 35.0
+
+  # smoothing history가 최소 몇 개 이상 쌓여야 smoothed angle을 신뢰할지.
+  min_valid_samples: 3
+
+# ============================================================
+# Sector quantization
+# ============================================================
+# 향후 sector 표시/로그를 AoA YAML 기준으로 통일하기 위한 설정.
+
+sector:
+  enabled: true
+  num_sectors: 8
+  min_angle_deg: -90
+  max_angle_deg: 90
+
+  # front_8: 전방 -90~+90을 8구역으로 나누는 현재 구조
+  mode: front_8
+
+# ============================================================
+# Runtime / logging
+# ============================================================
+
+runtime:
+  update_on_gain_change: true
+  reset_smoothing_on_gain_change: true
+  reset_smoothing_on_not_confirmed: true
+
+logging:
+  enabled: true
+  include_raw_phase: true
+  include_corrected_phase: true
+  include_coherence: true
+  include_smoothed_angle: true
+  include_sector: true
