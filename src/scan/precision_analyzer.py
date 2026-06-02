@@ -64,6 +64,12 @@ class PrecisionAnalysisResult:
     final_decision: str | None = None
     aoa_skipped_reason: str | None = None
 
+    aoa_smoothed_angle_deg: float | None = None
+    aoa_smoothing_valid: bool | None = None
+    aoa_smoothing_history_size: int | None = None
+    aoa_smoothing_method: str | None = None
+    aoa_smoothing_rejected_reason: str | None = None
+
 
 class PrecisionAnalyzer:
     """
@@ -75,6 +81,7 @@ class PrecisionAnalyzer:
     - CNN binary Drone/NotDrone 결과를 YAML threshold로 평가
     - temporal voting으로 candidate/confirmed 판단
     - confirmed일 때만 AoA/sector 계산
+    - AoA geometry/coherence/smoothing/sector는 configs/aoa.yaml 기준
     """
 
     def __init__(
@@ -86,6 +93,7 @@ class PrecisionAnalyzer:
         nperseg: int = 512,
         noverlap: int = 384,
         nfft: int = 512,
+        window: str = "hann",
         coherence_threshold: float = 0.6,
         phase_offset_rad: float = 0.0,
         settle_sec: float = 0.0,
@@ -96,6 +104,7 @@ class PrecisionAnalyzer:
         cnn_classifier=None,
         decision_cfg: RuntimeDecisionConfig | None = None,
         current_gain: int | float | None = None,
+        aoa_cfg: dict[str, Any] | None = None,
     ) -> None:
         self.receiver = receiver
         self.num_samples = int(num_samples)
@@ -105,8 +114,25 @@ class PrecisionAnalyzer:
         self.nperseg = int(nperseg)
         self.noverlap = int(noverlap)
         self.nfft = int(nfft)
+        self.window = str(window)
 
-        self.coherence_threshold = float(coherence_threshold)
+        self.aoa_cfg = aoa_cfg or {}
+        self.coherence_cfg = self.aoa_cfg.get("coherence", {}) or {}
+        self.smoothing_cfg = self.aoa_cfg.get("smoothing", {}) or {}
+        self.sector_cfg = self.aoa_cfg.get("sector", {}) or {}
+        self.runtime_cfg = self.aoa_cfg.get("runtime", {}) or {}
+
+        self.ref_channel = int(self.aoa_cfg.get("ref_channel", 0))
+        self.target_channel = int(self.aoa_cfg.get("target_channel", 1))
+        self.clip_angle_input = bool(self.aoa_cfg.get("clip_arcsin_input", True))
+        self.energy_percentile = float(self.coherence_cfg.get("energy_percentile", 75.0))
+        self.require_coherence_for_valid_angle = bool(
+            self.coherence_cfg.get("require_passed_for_valid_angle", True)
+        )
+
+        self.coherence_threshold = float(
+            self.coherence_cfg.get("threshold", coherence_threshold)
+        )
         self.phase_offset_rad = float(phase_offset_rad)
         self.settle_sec = float(settle_sec)
         self.precision_blocks = max(1, int(precision_blocks))
@@ -118,6 +144,20 @@ class PrecisionAnalyzer:
         self.cnn_classifier = cnn_classifier
         self.decision_cfg = decision_cfg
         self.current_gain = current_gain
+
+        self.smoothing_enabled = bool(self.smoothing_cfg.get("enabled", False))
+        self.smoothing_method = str(self.smoothing_cfg.get("method", "median")).lower().strip()
+        self.smoothing_window = max(1, int(self.smoothing_cfg.get("window_size", 5)))
+        self.smoothing_min_valid_samples = max(1, int(self.smoothing_cfg.get("min_valid_samples", 1)))
+        self.smoothing_require_angle_valid = bool(self.smoothing_cfg.get("require_angle_valid", True))
+        self.smoothing_require_coherence_passed = bool(
+            self.smoothing_cfg.get("require_coherence_passed", True)
+        )
+        self.smoothing_max_angle_jump_deg = self.smoothing_cfg.get("max_angle_jump_deg", None)
+        self.angle_history: deque[float] = deque(maxlen=self.smoothing_window)
+        self.reset_smoothing_on_not_confirmed = bool(
+            self.runtime_cfg.get("reset_smoothing_on_not_confirmed", True)
+        )
 
         if self.save_dir is not None:
             self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -176,6 +216,45 @@ class PrecisionAnalyzer:
             self.decision_cfg.positive_class,
         )
 
+    def _update_smoothed_angle(
+        self,
+        angle_deg: float | None,
+        angle_valid: bool | None,
+        coherence_passed: bool | None,
+    ) -> tuple[float | None, bool, int, str | None]:
+        if not self.smoothing_enabled:
+            return None, False, len(self.angle_history), "disabled"
+
+        if angle_deg is None or not np.isfinite(float(angle_deg)):
+            return None, False, len(self.angle_history), "angle_nan"
+
+        if self.smoothing_require_angle_valid and not bool(angle_valid):
+            return None, False, len(self.angle_history), "angle_invalid"
+
+        if self.smoothing_require_coherence_passed and not bool(coherence_passed):
+            return None, False, len(self.angle_history), "coherence_failed"
+
+        value = float(angle_deg)
+
+        if self.angle_history and self.smoothing_max_angle_jump_deg is not None:
+            last_value = float(self.angle_history[-1])
+            max_jump = float(self.smoothing_max_angle_jump_deg)
+            if abs(value - last_value) > max_jump:
+                return None, False, len(self.angle_history), "angle_jump_rejected"
+
+        self.angle_history.append(value)
+
+        if len(self.angle_history) < self.smoothing_min_valid_samples:
+            return None, False, len(self.angle_history), "not_enough_samples"
+
+        values = np.asarray(list(self.angle_history), dtype=float)
+        if self.smoothing_method == "mean":
+            smoothed = float(np.mean(values))
+        else:
+            smoothed = float(np.median(values))
+
+        return smoothed, True, len(self.angle_history), None
+
     def _empty_result(self, center_freq: float) -> PrecisionAnalysisResult:
         temporal_window = None
         if self.decision_cfg is not None:
@@ -214,6 +293,11 @@ class PrecisionAnalyzer:
             confirmed_status=False,
             final_decision="No valid precision block",
             aoa_skipped_reason="no_valid_precision_block",
+            aoa_smoothed_angle_deg=None,
+            aoa_smoothing_valid=False,
+            aoa_smoothing_history_size=len(self.angle_history),
+            aoa_smoothing_method=self.smoothing_method,
+            aoa_smoothing_rejected_reason="no_valid_precision_block",
         )
 
     def analyze(self, center_freq: float) -> PrecisionAnalysisResult:
@@ -244,24 +328,22 @@ class PrecisionAnalyzer:
             iq_raw = self.receiver.read_samples(self.num_samples)
             iq_dc = remove_dc_offset(iq_raw)
 
-            # AoA / complex STFT branch용
             iq = normalize_iq(iq_dc)
 
             if iq.ndim != 2 or iq.shape[0] < 2:
                 continue
 
-            # CNN Dataset Capture와 동일한 CNN 입력 생성 경로
             cnn_iq = get_cnn_input_iq(iq_dc, rx_index=0)
             cnn_iq = normalize_iq(cnn_iq, axis=-1, method="peak")
 
             branch = compute_dual_channel_stft_branch(
-                rx0_iq=iq[0],
-                rx1_iq=iq[1],
+                rx0_iq=iq[self.ref_channel],
+                rx1_iq=iq[self.target_channel],
                 sample_rate=self.sample_rate,
                 nperseg=self.nperseg,
                 noverlap=self.noverlap,
                 nfft=self.nfft,
-                window="hann",
+                window=self.window,
                 cnn_source="rx0",
             )
 
@@ -270,7 +352,7 @@ class PrecisionAnalyzer:
                 nperseg=self.nperseg,
                 hop_size=self.nperseg - self.noverlap,
                 nfft=self.nfft,
-                window="hann",
+                window=self.window,
             )
 
             cnn_result = None
@@ -362,19 +444,22 @@ class PrecisionAnalyzer:
         sector_index = None
         sector_label = None
         sector_valid = None
+        aoa_smoothed_angle_deg = None
+        aoa_smoothing_valid = False
+        aoa_smoothing_rejected_reason = None
 
         if should_run_aoa:
             coherence_result = coherence_gate(
                 z0=branch.rx0.complex_stft,
                 z1=branch.rx1.complex_stft,
                 threshold=self.coherence_threshold,
-                energy_percentile=75.0,
+                energy_percentile=self.energy_percentile,
             )
 
             phase_result = estimate_phase_diff(
                 iq_block=iq,
-                ref_channel=0,
-                target_channel=1,
+                ref_channel=self.ref_channel,
+                target_channel=self.target_channel,
             )
 
             angle_result = phase_diff_to_angle(
@@ -382,14 +467,7 @@ class PrecisionAnalyzer:
                 carrier_freq=float(center_freq),
                 antenna_spacing_m=self.antenna_spacing_m,
                 phase_offset_rad=self.phase_offset_rad,
-                clip_input=True,
-            )
-
-            sector_result = quantize_front_angle_to_sector(
-                angle_result.angle_deg if angle_result.valid and coherence_result.passed else None,
-                num_sectors=8,
-                min_angle=-90.0,
-                max_angle=90.0,
+                clip_input=self.clip_angle_input,
             )
 
             coherence_value = float(coherence_result.coherence)
@@ -398,11 +476,32 @@ class PrecisionAnalyzer:
             phase_diff_deg = float(phase_result.phase_diff_deg)
             angle_deg = float(angle_result.angle_deg)
             angle_valid = bool(angle_result.valid)
+
+            if self.require_coherence_for_valid_angle and not coherence_passed:
+                angle_valid = False
+
+            aoa_smoothed_angle_deg, aoa_smoothing_valid, _, aoa_smoothing_rejected_reason = self._update_smoothed_angle(
+                angle_deg=angle_deg,
+                angle_valid=angle_valid,
+                coherence_passed=coherence_passed,
+            )
+
+            angle_for_sector = aoa_smoothed_angle_deg if aoa_smoothing_valid else angle_deg
+            sector_result = quantize_front_angle_to_sector(
+                angle_for_sector if angle_valid and coherence_passed else None,
+                num_sectors=int(self.sector_cfg.get("num_sectors", 8)),
+                min_angle=float(self.sector_cfg.get("min_angle_deg", -90.0)),
+                max_angle=float(self.sector_cfg.get("max_angle_deg", 90.0)),
+            )
+
             sector_index = sector_result.sector_index
             sector_label = sector_result.sector_label
             sector_valid = sector_result.valid
         else:
             aoa_skipped_reason = "not_confirmed"
+            aoa_smoothing_rejected_reason = "not_confirmed"
+            if self.reset_smoothing_on_not_confirmed:
+                self.angle_history.clear()
 
         return PrecisionAnalysisResult(
             center_freq=float(center_freq),
@@ -437,4 +536,9 @@ class PrecisionAnalyzer:
             confirmed_status=bool(confirmed_status),
             final_decision=final_decision,
             aoa_skipped_reason=aoa_skipped_reason,
+            aoa_smoothed_angle_deg=aoa_smoothed_angle_deg,
+            aoa_smoothing_valid=bool(aoa_smoothing_valid),
+            aoa_smoothing_history_size=len(self.angle_history),
+            aoa_smoothing_method=self.smoothing_method,
+            aoa_smoothing_rejected_reason=aoa_smoothing_rejected_reason,
         )
