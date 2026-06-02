@@ -120,8 +120,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gains",
         nargs="+",
-        default=["10", "15", "20", "25", "30"],
-        help="Gain list. Example: --gains 10 15 20 25 30 or --gains 10,15,20,25,30",
+        default=["20", "25", "30", "35", "40"],
+        help="Gain list. Default: 20 25 30 35 40. Example: --gains 20 25 30 35 40",
     )
 
     parser.add_argument(
