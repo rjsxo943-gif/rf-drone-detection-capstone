@@ -309,6 +309,19 @@ def run_precision_screening(
     }
 
 
+def _is_drone_hit(result: Any, cfg: dict[str, Any]) -> bool:
+    if bool(cfg.get("extend_on_raw_drone_hit", True)):
+        try:
+            return float(result.drone_probability) >= float(result.drone_threshold)
+        except Exception:
+            return False
+    if bool(cfg.get("extend_on_confirmed", False)) and bool(result.confirmed_status):
+        return True
+    if bool(cfg.get("extend_on_candidate", False)) and bool(result.candidate_status):
+        return True
+    return False
+
+
 def run_precision_hold(
     runtime: ScanRuntime,
     *,
@@ -330,77 +343,75 @@ def run_precision_hold(
             "final_result": asdict(result),
         }
 
-    min_hold = max(0, int(cfg.get("min_hold_decisions", 3)))
-    max_hold = max(1, int(cfg.get("max_hold_decisions", 20)))
-    lost_grace = max(0, int(cfg.get("lost_grace_decisions", 4)))
-    blocks_per_decision = max(1, int(cfg.get("precision_blocks_per_decision", runtime.analyzer.precision_blocks)))
-    require_confirmed_once = bool(cfg.get("require_confirmed_once_before_grace_exit", False))
-    treat_candidate_alive = bool(cfg.get("treat_candidate_as_alive", True))
-    decision_delay_sec = float(cfg.get("decision_delay_sec", 0.0))
+    hold_mode = str(cfg.get("hold_mode", "sliding_block_grace"))
+    if hold_mode != "sliding_block_grace":
+        print(f"[HOLD WARN] unsupported hold_mode={hold_mode}, fallback to sliding_block_grace")
 
-    previous_blocks = _set_analyzer_precision_blocks(runtime.analyzer, blocks_per_decision)
+    blocks_per_step = max(1, int(cfg.get("blocks_per_step", 1)))
+    grace_blocks = max(0, int(cfg.get("grace_blocks_after_drone", 7)))
+    max_hold_blocks = max(1, int(cfg.get("max_hold_blocks", 100)))
+    min_hold_blocks = max(0, int(cfg.get("min_hold_blocks", grace_blocks)))
+    block_delay_sec = float(cfg.get("block_delay_sec", 0.0))
+
+    previous_blocks = _set_analyzer_precision_blocks(runtime.analyzer, blocks_per_step)
     if bool(cfg.get("reset_aoa_smoothing_on_enter", True)):
         _reset_aoa_smoothing_if_available(runtime.analyzer)
+
+    hold_until_block = grace_blocks - 1
+    last_hit_block = None
+    confirmed_once = bool((screening or {}).get("accepted", False))
+    exit_reason = "max_hold_blocks_reached"
 
     if verbose:
         print(
             f"\n[PRECISION_HOLD ENTER] cf={center_freq / 1e9:.6f} GHz | "
-            f"min={min_hold} max={max_hold} grace={lost_grace} "
-            f"blocks/decision={blocks_per_decision}"
+            f"mode=sliding_block_grace grace=+{grace_blocks} "
+            f"max_blocks={max_hold_blocks} blocks/step={blocks_per_step}"
         )
 
     results: list[dict[str, Any]] = []
-    lost_count = 0
-    confirmed_once = False
-    exit_reason = "max_hold_reached"
 
     try:
-        for hold_index in range(max_hold):
+        for hold_block in range(max_hold_blocks):
             result = runtime.analyzer.analyze(center_freq)
             result_dict = asdict(result)
-            result_dict["hold_index"] = hold_index
+            result_dict["hold_block"] = hold_block
             result_dict["hold_center_freq"] = float(center_freq)
             results.append(result_dict)
 
-            confirmed = bool(result.confirmed_status)
-            candidate = bool(result.candidate_status)
-            alive = confirmed or (treat_candidate_alive and candidate)
+            drone_hit = _is_drone_hit(result, cfg)
+            if drone_hit:
+                last_hit_block = hold_block
+                hold_until_block = max(hold_until_block, hold_block + grace_blocks)
 
-            if confirmed:
+            if bool(result.confirmed_status):
                 confirmed_once = True
 
-            if alive:
-                lost_count = 0
-            else:
-                lost_count += 1
+            remaining = hold_until_block - hold_block
 
             if verbose:
                 print(
-                    f"  [HOLD {hold_index + 1:03d}/{max_hold}] "
+                    f"  [HOLD_BLOCK {hold_block:03d}/{max_hold_blocks}] "
                     f"cnn={result.cnn_label} prob={result.drone_probability} "
-                    f"thr={result.drone_threshold} votes={result.drone_vote_count}/{result.temporal_window} "
+                    f"thr={result.drone_threshold} hit={drone_hit} "
+                    f"hold_until={hold_until_block} remain={remaining} "
+                    f"votes={result.drone_vote_count}/{result.temporal_window} "
                     f"cand={result.candidate_status} conf={result.confirmed_status} "
-                    f"lost={lost_count}/{lost_grace} "
                     f"angle={result.angle_deg} smooth={result.aoa_smoothed_angle_deg} "
                     f"sector={result.sector_index} final={result.final_decision}"
                 )
 
-            if hold_index + 1 < min_hold:
-                if decision_delay_sec > 0:
-                    time.sleep(decision_delay_sec)
+            if hold_block + 1 < min_hold_blocks:
+                if block_delay_sec > 0:
+                    time.sleep(block_delay_sec)
                 continue
 
-            if require_confirmed_once and not confirmed_once:
-                if decision_delay_sec > 0:
-                    time.sleep(decision_delay_sec)
-                continue
-
-            if lost_count > lost_grace:
-                exit_reason = "lost_grace_exceeded"
+            if hold_block >= hold_until_block:
+                exit_reason = "sliding_grace_expired"
                 break
 
-            if decision_delay_sec > 0:
-                time.sleep(decision_delay_sec)
+            if block_delay_sec > 0:
+                time.sleep(block_delay_sec)
 
     finally:
         runtime.analyzer.precision_blocks = previous_blocks
@@ -410,7 +421,8 @@ def run_precision_hold(
     if verbose:
         print(
             f"[PRECISION_HOLD EXIT] cf={center_freq / 1e9:.6f} GHz | "
-            f"decisions={len(results)} confirmed_once={confirmed_once} reason={exit_reason}"
+            f"blocks={len(results)} last_hit={last_hit_block} "
+            f"hold_until={hold_until_block} confirmed_once={confirmed_once} reason={exit_reason}"
         )
 
     return {
@@ -419,13 +431,16 @@ def run_precision_hold(
         "cycle_index": int(cycle_index),
         "trigger": asdict(trigger_event),
         "screening": screening,
-        "min_hold_decisions": min_hold,
-        "max_hold_decisions": max_hold,
-        "lost_grace_decisions": lost_grace,
-        "precision_blocks_per_decision": blocks_per_decision,
+        "hold_mode": "sliding_block_grace",
+        "blocks_per_step": blocks_per_step,
+        "grace_blocks_after_drone": grace_blocks,
+        "max_hold_blocks": max_hold_blocks,
+        "min_hold_blocks": min_hold_blocks,
+        "last_hit_block": last_hit_block,
+        "hold_until_block": hold_until_block,
         "confirmed_once": bool(confirmed_once),
         "exit_reason": exit_reason,
-        "num_decisions": len(results),
+        "num_blocks": len(results),
         "results": results,
         "final_result": final_result,
     }
