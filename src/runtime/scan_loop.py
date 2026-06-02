@@ -256,12 +256,66 @@ def _reset_aoa_smoothing_if_available(analyzer: PrecisionAnalyzer) -> None:
         history.clear()
 
 
+def run_precision_screening(
+    runtime: ScanRuntime,
+    *,
+    center_freq: float,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    cfg = runtime.precision_hold_cfg.get("entry_screening", {}) or {}
+    enabled = bool(cfg.get("enabled", True))
+    if not enabled:
+        return {"enabled": False, "accepted": True, "reason": "screening_disabled", "result": None}
+
+    blocks = max(1, int(cfg.get("precision_blocks", runtime.analyzer.precision_blocks)))
+    require_confirmed = bool(cfg.get("require_confirmed", True))
+    allow_candidate = bool(cfg.get("allow_candidate", False))
+
+    previous_blocks = _set_analyzer_precision_blocks(runtime.analyzer, blocks)
+    try:
+        result = runtime.analyzer.analyze(center_freq)
+    finally:
+        runtime.analyzer.precision_blocks = previous_blocks
+
+    confirmed = bool(result.confirmed_status)
+    candidate = bool(result.candidate_status)
+
+    if require_confirmed:
+        accepted = confirmed
+    elif allow_candidate:
+        accepted = confirmed or candidate
+    else:
+        accepted = confirmed
+
+    reason = "drone_confirmed" if accepted else "not_drone_rejected"
+
+    if verbose:
+        print(
+            f"  [CNN_SCREEN] cf={center_freq / 1e9:.6f} GHz | "
+            f"cnn={result.cnn_label} prob={result.drone_probability} thr={result.drone_threshold} "
+            f"votes={result.drone_vote_count}/{result.temporal_window} "
+            f"candidate={result.candidate_status} confirmed={result.confirmed_status} "
+            f"accepted={accepted} reason={reason}"
+        )
+
+    return {
+        "enabled": True,
+        "accepted": bool(accepted),
+        "reason": reason,
+        "require_confirmed": require_confirmed,
+        "allow_candidate": allow_candidate,
+        "precision_blocks": blocks,
+        "result": asdict(result),
+    }
+
+
 def run_precision_hold(
     runtime: ScanRuntime,
     *,
     center_freq: float,
     cycle_index: int,
     trigger_event: Any,
+    screening: dict[str, Any] | None = None,
     verbose: bool = True,
 ) -> dict[str, Any]:
     cfg = runtime.precision_hold_cfg
@@ -271,6 +325,7 @@ def run_precision_hold(
             "enabled": False,
             "center_freq": float(center_freq),
             "reason": "disabled",
+            "screening": screening,
             "results": [asdict(result)],
             "final_result": asdict(result),
         }
@@ -363,6 +418,7 @@ def run_precision_hold(
         "center_freq": float(center_freq),
         "cycle_index": int(cycle_index),
         "trigger": asdict(trigger_event),
+        "screening": screening,
         "min_hold_decisions": min_hold,
         "max_hold_decisions": max_hold,
         "lost_grace_decisions": lost_grace,
@@ -394,22 +450,42 @@ def run_one_scan_cycle(
 
         if not event.triggered:
             event_dict["analysis"] = None
+            event_dict["cnn_screening"] = None
             event_dict["precision_hold"] = None
             event_dicts.append(event_dict)
             continue
 
         if verbose:
             print(
-                f"\n[TRIGGER] {event.center_freq / 1e9:.3f} GHz | "
+                f"\n[ENERGY_TRIGGER] {event.center_freq / 1e9:.3f} GHz | "
                 f"max_fft_power={event.max_fft_power:.3e} | "
                 f"pass_count={event.pass_count}/{runtime.scan_blocks}"
             )
+
+        screening = run_precision_screening(
+            runtime,
+            center_freq=event.center_freq,
+            verbose=verbose,
+        )
+        event_dict["cnn_screening"] = screening
+
+        if not bool(screening.get("accepted", False)):
+            event_dict["analysis"] = screening.get("result")
+            event_dict["precision_hold"] = None
+            if verbose:
+                print(
+                    f"  [HOLD_SKIP] cf={event.center_freq / 1e9:.6f} GHz | "
+                    f"reason={screening.get('reason')}"
+                )
+            event_dicts.append(event_dict)
+            continue
 
         hold = run_precision_hold(
             runtime,
             center_freq=event.center_freq,
             cycle_index=cycle_index,
             trigger_event=event,
+            screening=screening,
             verbose=verbose,
         )
         event_dict["precision_hold"] = hold
