@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import sys
+import math
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from src.core import load_all_configs
 from src.features.spectrogram import compute_stft_branch
+from src.ml.runtime_decision import load_runtime_decision_config, select_drone_threshold
+from src.preprocess.dc_blocker import remove_dc_offset
 from src.receiver.pluto_receiver import PlutoReceiver
 from src.runtime.calibration_runtime import load_calibration_runtime
 from src.viewer import (
@@ -28,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="OpenCV-based live RF viewer for fast/profile/cnn/aoa/full experiment modes."
     )
+    parser.add_argument("--config-dir", default="configs")
     parser.add_argument("--mode", choices=SUPPORTED_MODES, default="fast")
     parser.add_argument("--uri", default="ip:192.168.2.1")
     parser.add_argument("--center-freq", type=int, default=2_450_000_000)
@@ -39,6 +44,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-gain", type=float, default=73.0)
     parser.add_argument("--block-size", type=int, default=16_384)
     parser.add_argument("--rx-index", type=int, default=0)
+    parser.add_argument(
+        "--disable-dc-offset-removal",
+        action="store_true",
+        help="Disable per-block per-channel DC offset removal before feature/CNN/AoA processing.",
+    )
     parser.add_argument("--num-channels", type=int, choices=(1, 2), default=2)
     parser.add_argument("--target-fps", type=float, default=None)
     parser.add_argument(
@@ -103,7 +113,7 @@ def parse_args() -> argparse.Namespace:
         help="Expected frequency-axis bins for display. Default: 128, so display shape is (128, time_bins).",
     )
     parser.add_argument("--model", default=None, help="CNN model checkpoint path for cnn mode.")
-    parser.add_argument("--cnn-backend", choices=("binary", "torch", "keras", "dummy"), default="torch")
+    parser.add_argument("--cnn-backend", choices=("binary", "binary_flat", "rf4_binary", "drone_binary", "torch", "keras", "dummy"), default="torch")
     parser.add_argument("--cnn-device", default="cpu")
     parser.add_argument(
         "--class-names",
@@ -201,10 +211,154 @@ def _parse_csv_values(value: str) -> list[str]:
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
+def _flag_given(*flags: str) -> bool:
+    argv = sys.argv[1:]
+    for flag in flags:
+        if flag in argv:
+            return True
+        if any(str(item).startswith(flag + "=") for item in argv):
+            return True
+    return False
+
+
+def _nested_get(mapping: dict[str, Any], keys: list[str], default: Any = None) -> Any:
+    cur: Any = mapping
+    for key in keys:
+        if not isinstance(cur, dict) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
+
+
+def _csv(values: Any) -> str:
+    if values is None:
+        return ""
+    if isinstance(values, str):
+        return values
+    return ",".join(str(v) for v in values)
+
+
+def _viewer_backend(value: Any) -> str:
+    backend = str(value or "dummy").lower().strip()
+    if backend in {"binary_flat", "rf4_binary", "drone_binary"}:
+        return "binary"
+    return backend
+
+
+def _set_yaml_default(args: argparse.Namespace, attr: str, flags: tuple[str, ...], value: Any) -> None:
+    if value is None:
+        return
+    if _flag_given(*flags):
+        return
+    setattr(args, attr, value)
+
+
+def apply_yaml_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    configs = load_all_configs(args.config_dir)
+
+    receiver_cfg = configs.get("receiver", {}) or {}
+    sdr_cfg = receiver_cfg.get("sdr", {}) or {}
+    ml_cfg = configs.get("ml", {}) or {}
+    aoa_cfg = configs.get("aoa", {}) or {}
+
+    stft_cfg = ml_cfg.get("stft", {}) or {}
+    spectrogram_cfg = ml_cfg.get("spectrogram", {}) or {}
+    cnn_input_cfg = ml_cfg.get("cnn_input", {}) or {}
+    inference_cfg = ml_cfg.get("inference", {}) or {}
+    temporal_cfg = inference_cfg.get("temporal_voting", {}) or {}
+    raw_safety_cfg = ml_cfg.get("raw_safety", {}) or {}
+    overload_cfg = raw_safety_cfg.get("overload", {}) or {}
+
+    decision_cfg = load_runtime_decision_config(ml_cfg)
+
+    # Receiver / SDR
+    _set_yaml_default(args, "uri", ("--uri",), sdr_cfg.get("uri"))
+    _set_yaml_default(args, "center_freq", ("--center-freq",), sdr_cfg.get("center_freq", receiver_cfg.get("center_freq")))
+    _set_yaml_default(args, "sample_rate", ("--sample-rate",), sdr_cfg.get("sample_rate", receiver_cfg.get("sample_rate")))
+    _set_yaml_default(args, "rf_bandwidth", ("--rf-bandwidth",), sdr_cfg.get("rf_bandwidth", receiver_cfg.get("rf_bandwidth")))
+    _set_yaml_default(args, "gain", ("--gain",), sdr_cfg.get("gain", receiver_cfg.get("gain")))
+    _set_yaml_default(args, "block_size", ("--block-size",), sdr_cfg.get("block_size", receiver_cfg.get("block_size", ml_cfg.get("block_size"))))
+    _set_yaml_default(args, "num_channels", ("--num-channels",), receiver_cfg.get("num_channels", len(sdr_cfg.get("channels", [0, 1]))))
+    _set_yaml_default(args, "rx_index", ("--rx-index",), cnn_input_cfg.get("rx_index", 0))
+
+    # STFT / spectrogram
+    _set_yaml_default(args, "nperseg", ("--nperseg",), stft_cfg.get("nperseg"))
+    _set_yaml_default(args, "noverlap", ("--noverlap",), stft_cfg.get("noverlap"))
+    _set_yaml_default(args, "nfft", ("--nfft",), stft_cfg.get("nfft"))
+    _set_yaml_default(args, "window", ("--window",), stft_cfg.get("window"))
+    _set_yaml_default(
+        args,
+        "display_freq_bins",
+        ("--display-freq-bins",),
+        stft_cfg.get("expected_freq_bins", spectrogram_cfg.get("image_height")),
+    )
+
+    # CNN
+    _set_yaml_default(args, "model", ("--model",), inference_cfg.get("model_path"))
+    if not _flag_given("--cnn-backend"):
+        args.cnn_backend = _viewer_backend(inference_cfg.get("backend", args.cnn_backend))
+    else:
+        args.cnn_backend = _viewer_backend(args.cnn_backend)
+
+    _set_yaml_default(args, "cnn_device", ("--cnn-device",), inference_cfg.get("device"))
+    _set_yaml_default(args, "class_names", ("--class-names",), _csv(ml_cfg.get("class_names", ["NotDrone", "Drone"])))
+    _set_yaml_default(
+        args,
+        "cnn_positive_class_names",
+        ("--cnn-positive-class-names",),
+        str(ml_cfg.get("positive_class", temporal_cfg.get("positive_class", "Drone"))),
+    )
+    _set_yaml_default(
+        args,
+        "cnn_confidence_threshold",
+        ("--cnn-confidence-threshold",),
+        select_drone_threshold(decision_cfg, args.gain),
+    )
+    _set_yaml_default(args, "cnn_smooth_window", ("--cnn-smooth-window",), temporal_cfg.get("window_size"))
+    _set_yaml_default(args, "cnn_confirm_votes", ("--cnn-confirm-votes",), temporal_cfg.get("confirmed_vote_k"))
+    _set_yaml_default(args, "cnn_dummy_class_name", ("--cnn-dummy-class-name",), ml_cfg.get("negative_class", "NotDrone"))
+
+    # AoA
+    _set_yaml_default(args, "aoa_ref_channel", ("--aoa-ref-channel",), aoa_cfg.get("ref_channel"))
+    _set_yaml_default(args, "aoa_target_channel", ("--aoa-target-channel",), aoa_cfg.get("target_channel"))
+    _set_yaml_default(args, "aoa_antenna_spacing_m", ("--aoa-antenna-spacing-m",), aoa_cfg.get("antenna_spacing_m"))
+    _set_yaml_default(args, "aoa_speed_of_light", ("--aoa-speed-of-light",), aoa_cfg.get("speed_of_light"))
+    _set_yaml_default(args, "aoa_coherence_threshold", ("--aoa-coherence-threshold",), _nested_get(aoa_cfg, ["coherence", "threshold"]))
+    if not _flag_given("--aoa-phase-offset-deg"):
+        phase_offset_rad = aoa_cfg.get("phase_offset_rad")
+        if phase_offset_rad is not None:
+            args.aoa_phase_offset_deg = math.degrees(float(phase_offset_rad))
+
+    # Calibration / raw safety
+    _set_yaml_default(args, "overload_threshold", ("--overload-threshold",), overload_cfg.get("raw_peak_overload"))
+
+    args._decision_cfg = decision_cfg
+    args._ml_cfg = ml_cfg
+
+    print("=== live_rf_viewer YAML config loaded ===")
+    print(f"config_dir      : {args.config_dir}")
+    print(f"receiver gain   : {args.gain}")
+    print(f"center_freq     : {args.center_freq}")
+    print(f"sample_rate     : {args.sample_rate}")
+    print(f"block_size      : {args.block_size}")
+    print(f"rx_index        : {args.rx_index}")
+    print(f"stft            : nperseg={args.nperseg}, noverlap={args.noverlap}, nfft={args.nfft}")
+    print(f"cnn_backend     : {args.cnn_backend}")
+    print(f"cnn_model       : {args.model}")
+    print(f"class_names     : {args.class_names}")
+    print(f"positive_class  : {args.cnn_positive_class_names}")
+    print(f"cnn_threshold   : {args.cnn_confidence_threshold}")
+    print(f"cnn_voting      : window={args.cnn_smooth_window}, confirmed={args.cnn_confirm_votes}")
+    print(f"raw_overload_th : {args.overload_threshold}")
+    print("=========================================")
+
+    return args
+
+
 def build_cnn_runtime(args: argparse.Namespace) -> CNNRuntime:
     return CNNRuntime(
         model_path=args.model,
-        backend=args.cnn_backend,
+        backend=_viewer_backend(args.cnn_backend),
         device=args.cnn_device,
         class_names=_parse_csv_values(args.class_names),
         positive_class_names=_parse_csv_values(args.cnn_positive_class_names),
@@ -577,7 +731,7 @@ def handle_key(
 
 
 def run() -> int:
-    args = parse_args()
+    args = apply_yaml_defaults(parse_args())
     state = ViewerState(
         mode=args.mode,
         gain=args.gain,
@@ -632,6 +786,8 @@ def run() -> int:
             read_new_block = False
             if not state.paused or last_iq is None:
                 last_iq = receiver.read_block(args.block_size)
+                if not args.disable_dc_offset_removal:
+                    last_iq = remove_dc_offset(last_iq, axis=-1)
                 state.mark_update()
                 read_new_block = True
 
@@ -659,6 +815,12 @@ def run() -> int:
 
             cnn_result = None
             if cnn_runtime is not None:
+                # Gain-aware Drone threshold from configs/ml.yaml.
+                if hasattr(args, "_decision_cfg"):
+                    cnn_runtime.confidence_threshold = select_drone_threshold(
+                        args._decision_cfg,
+                        state.gain,
+                    )
                 image, cnn_result = cnn_runtime.process(last_iq)
             else:
                 iq_1d = select_iq_channel(last_iq, args.rx_index)
