@@ -29,3 +29,42 @@ spectrogram:
 # - 현재 RF3 CNN은 Background / Bluetooth / WiFi 3분류 모델
 # - RF3 CNN 입력 spectrogram shape = [128, 509]
 # - Drone-like 클래스와 AoA gate는 추후 드론 데이터 확보 후 확장 예정
+
+# ============================================================
+# OpenCV Live RF Viewer
+# ============================================================
+#
+# scripts/live_rf_viewer_drone_aoa.py 전용 runtime/viewer 정책.
+#
+# 원칙:
+# - receiver / ml / aoa 물리·모델 파라미터는 각 YAML에서 관리한다.
+# - 여기서는 OpenCV viewer의 update 방식, 대표 block 선택, CLI 로그 주기만 관리한다.
+# - CLI 인자는 임시 실험 override 용도로만 사용한다.
+live_rf_viewer:
+  # 한 번의 viewer update에서 읽을 RF block 개수.
+  # 여러 block 중 대표 block 하나를 골라 CNN/AoA에 넣는다.
+  # 값이 클수록 Drone voting/AoA는 안정적이지만 화면 업데이트는 느려진다.
+  blocks_per_update: 20
+
+  # 대표 block 선택 정책.
+  # raw_gate_pass_score_max:
+  #   raw noise gate를 통과한 block 중 score_max가 가장 큰 block 선택.
+  #   통과 block이 없으면 전체 중 score_max 최대 block 선택.
+  #   이후 raw gate fail이면 CNN/AoA는 그대로 막힌다.
+  #
+  # 사용 가능:
+  # - raw_gate_pass_score_max
+  # - raw_gate_score_max
+  # - raw_p99
+  # - frame_power_p99
+  # - last
+  select_policy: raw_gate_pass_score_max
+
+  # 터미널 상태 로그 출력 주기.
+  # 1이면 매 update set마다 한 줄 출력.
+  # 너무 빠르면 3, 5, 10으로 올린다.
+  cli_log_every_n: 1
+
+  # true면 터미널 주기 로그 비활성화.
+  disable_cli_log: false
+

@@ -39,8 +39,19 @@ scan:
     entry_screening:
       enabled: true
       precision_blocks: 5
-      require_confirmed: true
+
+      # representative candidate_verify에서는 analyze() 1회가 CNN vote 1개만 만든다.
+      # 따라서 entry 단계에서 confirmed=True를 요구하면 hold에 거의 못 들어간다.
+      require_confirmed: false
       allow_candidate: false
+
+      # RawNoiseGate를 통과한 selected block이 CNN threshold 이상이면 hold 진입 허용.
+      # 현재 2.460/2.465 GHz 드론 데이터를 아직 학습에 충분히 넣지 않았으므로
+      # 임시로 0.35부터 시작한다. 데이터 보강 후 0.65~0.80으로 올릴 수 있다.
+      accept_raw_drone_hit: true
+      entry_probability_threshold: 0.35
+      require_raw_gate_passed: true
+
       reject_not_drone: true
 
     hold_mode: sliding_block_grace

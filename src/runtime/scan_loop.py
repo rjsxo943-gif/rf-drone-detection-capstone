@@ -11,6 +11,7 @@ from typing import Any
 from src.core.config import load_all_configs
 from src.calibration import load_calibration_params
 from src.runtime.calibration_actions import DEFAULT_NOISE_OUTPUT, DEFAULT_PHASE_GAIN_OUTPUT
+from src.runtime.raw_noise_gate import RawNoiseGate
 from src.ml.runtime_classifier_factory import build_runtime_cnn_classifier
 from src.ml.runtime_decision import RuntimeDecisionConfig, load_runtime_decision_config
 from src.receiver.factory import build_receiver
@@ -19,6 +20,30 @@ from src.scan.precision_analyzer import PrecisionAnalyzer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass
+class RawGateScanEvent:
+    center_freq: float
+    triggered: bool
+    pass_count: int
+    scan_blocks: int
+    discard_blocks: int
+    usable_blocks: int
+
+    max_fft_power: float = 0.0
+    best_score_max: float | None = None
+    best_score_median: float | None = None
+    threshold: float | None = None
+    noise_floor: float | None = None
+    threshold_multiplier: float | None = None
+    matched_gain: float | None = None
+    matched_by: str = ""
+    raw_gate_label: str = ""
+    raw_gate_reason: str = ""
+    raw_gate_passed_blocks: list[int] | None = None
+    raw_gate_scores: list[float] | None = None
+    filtered_by_max_candidates: bool = False
 
 
 @dataclass
@@ -46,6 +71,9 @@ class ScanRuntime:
     save_stft: bool
     scan_cfg: dict[str, Any]
     precision_hold_cfg: dict[str, Any]
+    raw_gate: RawNoiseGate
+    scan_candidate_cfg: dict[str, Any]
+    current_gain: float | None
 
     def close(self) -> None:
         close_fn = getattr(self.receiver, "close", None)
@@ -88,6 +116,196 @@ def _receiver_sample_rate(receiver_cfg: dict[str, Any]) -> float:
     return float(receiver_cfg["sample_rate"])
 
 
+def _set_receiver_center_freq(receiver: Any, center_freq: float) -> None:
+    center_freq_int = int(center_freq)
+
+    if hasattr(receiver, "set_center_freq"):
+        setter = getattr(receiver, "set_center_freq")
+        if callable(setter):
+            setter(center_freq_int)
+            return
+
+    if hasattr(receiver, "center_freq"):
+        try:
+            receiver.center_freq = center_freq_int
+        except Exception:
+            pass
+
+    sdr = getattr(receiver, "sdr", None)
+    if sdr is not None and hasattr(sdr, "rx_lo"):
+        try:
+            sdr.rx_lo = center_freq_int
+            return
+        except Exception:
+            pass
+
+    if hasattr(receiver, "_set_center_freq"):
+        setter = getattr(receiver, "_set_center_freq")
+        if callable(setter):
+            setter(center_freq_int)
+            return
+
+
+def _read_receiver_block(receiver: Any, num_samples: int) -> Any:
+    if hasattr(receiver, "read_block"):
+        return receiver.read_block(int(num_samples))
+    if hasattr(receiver, "read_samples"):
+        return receiver.read_samples(int(num_samples))
+    raise AttributeError("receiver has neither read_block nor read_samples")
+
+
+def _build_scan_freqs_from_runtime(runtime: "ScanRuntime") -> list[float]:
+    freqs: list[float] = []
+    cur = float(runtime.start_freq)
+    stop = float(runtime.stop_freq)
+    step = float(runtime.step_freq)
+
+    if step <= 0:
+        raise ValueError(f"step_freq must be positive, got {step}")
+
+    while cur <= stop + step * 0.5:
+        freqs.append(float(cur))
+        cur += step
+
+    return freqs
+
+
+def _safe_scan_score(value: Any) -> float:
+    try:
+        v = float(value)
+        if v != v:
+            return float("-inf")
+        return v
+    except Exception:
+        return float("-inf")
+
+
+def _run_raw_gate_scan_once(
+    runtime: "ScanRuntime",
+    *,
+    verbose: bool = True,
+) -> list[RawGateScanEvent]:
+    cfg = runtime.scan_candidate_cfg or {}
+
+    blocks_per_freq = max(1, int(cfg.get("blocks_per_freq", 8)))
+    discard_blocks = max(0, int(cfg.get("discard_blocks_after_tune", 4)))
+    min_pass_count = max(1, int(cfg.get("min_raw_gate_pass_count", 1)))
+    max_candidates = int(cfg.get("max_candidates", 0))
+
+    if discard_blocks >= blocks_per_freq:
+        raise ValueError(
+            "scan_candidate.discard_blocks_after_tune must be smaller than "
+            f"blocks_per_freq. got discard={discard_blocks}, blocks={blocks_per_freq}"
+        )
+
+    usable_blocks = blocks_per_freq - discard_blocks
+    settle_sec = float(runtime.scan_cfg.get("settle_sec", 0.0))
+    scan_gain = float(runtime.current_gain if runtime.current_gain is not None else 0.0)
+
+    events: list[RawGateScanEvent] = []
+
+    for center_freq in _build_scan_freqs_from_runtime(runtime):
+        _set_receiver_center_freq(runtime.receiver, center_freq)
+        if settle_sec > 0:
+            time.sleep(settle_sec)
+
+        gate_results: list[Any] = []
+        passed_blocks: list[int] = []
+        scores: list[float] = []
+
+        for block_idx in range(blocks_per_freq):
+            iq_block = _read_receiver_block(runtime.receiver, runtime.num_samples)
+
+            if block_idx < discard_blocks:
+                continue
+
+            gate_result = runtime.raw_gate.evaluate(iq_block, gain=scan_gain)
+            gate_results.append(gate_result)
+
+            score = _safe_scan_score(gate_result.score_max)
+            scores.append(score)
+
+            if bool((not gate_result.enabled) or gate_result.passed):
+                passed_blocks.append(block_idx)
+
+        pass_count = len(passed_blocks)
+        triggered = pass_count >= min_pass_count
+
+        if gate_results:
+            best_result = max(
+                gate_results,
+                key=lambda item: _safe_scan_score(item.score_max),
+            )
+            best_score = _safe_scan_score(best_result.score_max)
+            best_score_value = None if best_score == float("-inf") else float(best_score)
+            event = RawGateScanEvent(
+                center_freq=float(center_freq),
+                triggered=bool(triggered),
+                pass_count=int(pass_count),
+                scan_blocks=int(blocks_per_freq),
+                discard_blocks=int(discard_blocks),
+                usable_blocks=int(usable_blocks),
+                max_fft_power=float(best_score_value or 0.0),
+                best_score_max=best_score_value,
+                best_score_median=float(best_result.score_median),
+                threshold=best_result.threshold,
+                noise_floor=best_result.noise_floor,
+                threshold_multiplier=best_result.threshold_multiplier,
+                matched_gain=best_result.matched_gain,
+                matched_by=str(best_result.matched_by),
+                raw_gate_label=str(best_result.label),
+                raw_gate_reason=str(best_result.reason),
+                raw_gate_passed_blocks=list(passed_blocks),
+                raw_gate_scores=[float(s) for s in scores],
+            )
+        else:
+            event = RawGateScanEvent(
+                center_freq=float(center_freq),
+                triggered=False,
+                pass_count=0,
+                scan_blocks=int(blocks_per_freq),
+                discard_blocks=int(discard_blocks),
+                usable_blocks=int(usable_blocks),
+                raw_gate_label="NO_USABLE_BLOCKS",
+                raw_gate_reason="no_usable_blocks_after_discard",
+                raw_gate_passed_blocks=[],
+                raw_gate_scores=[],
+            )
+
+        events.append(event)
+
+        if verbose:
+            print(
+                f"[RAW_SCAN] f={center_freq / 1e9:.6f} GHz "
+                f"pass={event.pass_count}/{event.usable_blocks} "
+                f"trigger={event.triggered} "
+                f"score={event.best_score_max} "
+                f"thr={event.threshold} "
+                f"label={event.raw_gate_label}"
+            )
+
+    if max_candidates > 0:
+        triggered_events = [event for event in events if event.triggered]
+        keep_freqs = {
+            event.center_freq
+            for event in sorted(
+                triggered_events,
+                key=lambda item: _safe_scan_score(item.best_score_max),
+                reverse=True,
+            )[:max_candidates]
+        }
+
+        filtered: list[RawGateScanEvent] = []
+        for event in events:
+            if event.triggered and event.center_freq not in keep_freqs:
+                event.triggered = False
+                event.filtered_by_max_candidates = True
+            filtered.append(event)
+        events = filtered
+
+    return events
+
+
 def setup_scan_runtime(
     *,
     config_dir: str | Path = PROJECT_ROOT / "configs",
@@ -98,12 +316,15 @@ def setup_scan_runtime(
     paths_cfg = cfg["paths"]
     ml_cfg = cfg["ml"]
     aoa_cfg = cfg.get("aoa", {}) or {}
+    detect_cfg = cfg.get("detect", {}) or {}
     stft_cfg = ml_cfg.get("stft", {})
     coherence_cfg = aoa_cfg.get("coherence", {}) or {}
     smoothing_cfg = aoa_cfg.get("smoothing", {}) or {}
 
     scan_cfg = _unwrap_scan_cfg(cfg["scan"])
     precision_hold_cfg = scan_cfg.get("precision_hold", {}) or {}
+    scan_candidate_cfg = detect_cfg.get("scan_candidate", {}) or {}
+
 
     print()
     print("=== SCAN CONFIG DEBUG ===")
@@ -137,6 +358,18 @@ def setup_scan_runtime(
 
     receiver = build_receiver(receiver_cfg)
     current_gain = _get_receiver_gain(receiver, receiver_cfg)
+
+    raw_gate = RawNoiseGate(
+        detect_config_path=Path(config_dir) / "detect.yaml",
+        project_root=PROJECT_ROOT,
+    )
+    print("=== RAW GATE SCAN CONFIG ===")
+    print(f"raw_gate_enabled : {raw_gate.enabled}")
+    print(f"raw_gate_profile : {raw_gate.noise_profile_path}")
+    print(f"scan_candidate   : {scan_candidate_cfg}")
+    print(f"scan_gain        : {current_gain}")
+    print("============================")
+    print()
 
     scanner = FrequencyScanner(
         receiver=receiver,
@@ -242,6 +475,9 @@ def setup_scan_runtime(
         save_stft=save_stft,
         scan_cfg=scan_cfg,
         precision_hold_cfg=precision_hold_cfg,
+        raw_gate=raw_gate,
+        scan_candidate_cfg=scan_candidate_cfg,
+        current_gain=current_gain,
     )
 
 
@@ -277,6 +513,9 @@ def run_precision_screening(
     blocks = max(1, int(cfg.get("precision_blocks", runtime.analyzer.precision_blocks)))
     require_confirmed = bool(cfg.get("require_confirmed", True))
     allow_candidate = bool(cfg.get("allow_candidate", False))
+    accept_raw_drone_hit = bool(cfg.get("accept_raw_drone_hit", False))
+    entry_probability_threshold = cfg.get("entry_probability_threshold", None)
+    require_raw_gate_passed = bool(cfg.get("require_raw_gate_passed", True))
 
     # New energy trigger -> new CNN screening sequence.
     # Reset temporal voting here, then keep it alive into precision hold if accepted.
@@ -291,19 +530,59 @@ def run_precision_screening(
     confirmed = bool(result.confirmed_status)
     candidate = bool(result.candidate_status)
 
+    raw_prob = result.drone_probability
+    model_thr = result.drone_threshold
+
+    if entry_probability_threshold is None:
+        entry_thr = model_thr
+    else:
+        entry_thr = float(entry_probability_threshold)
+
+    raw_drone_hit = False
+    try:
+        raw_drone_hit = (
+            raw_prob is not None
+            and entry_thr is not None
+            and float(raw_prob) >= float(entry_thr)
+        )
+    except Exception:
+        raw_drone_hit = False
+
+    raw_gate_value = getattr(result, "raw_gate_passed", None)
+    raw_gate_passed_for_entry = (
+        True
+        if not require_raw_gate_passed
+        else bool(raw_gate_value)
+    )
+
+    strong_entry_hit = bool(raw_drone_hit and raw_gate_passed_for_entry)
+
     if require_confirmed:
         accepted = confirmed
+    elif accept_raw_drone_hit:
+        accepted = strong_entry_hit
     elif allow_candidate:
         accepted = confirmed or candidate
     else:
         accepted = confirmed
 
-    reason = "drone_confirmed" if accepted else "not_drone_rejected"
+    if accepted and confirmed:
+        reason = "drone_confirmed"
+    elif accepted and strong_entry_hit:
+        reason = "raw_drone_hit_accepted"
+    elif accept_raw_drone_hit and not raw_gate_passed_for_entry:
+        reason = "raw_gate_not_passed"
+    elif accept_raw_drone_hit and not raw_drone_hit:
+        reason = "below_entry_probability_threshold"
+    else:
+        reason = "not_drone_rejected"
 
     if verbose:
         print(
             f"  [CNN_SCREEN] cf={center_freq / 1e9:.6f} GHz | "
-            f"cnn={result.cnn_label} prob={result.drone_probability} thr={result.drone_threshold} "
+            f"cnn={result.cnn_label} prob={result.drone_probability} "
+            f"thr={result.drone_threshold} entry_thr={entry_thr} "
+            f"raw_hit={raw_drone_hit} raw_gate={raw_gate_value} "
             f"votes={result.drone_vote_count}/{result.temporal_window} "
             f"candidate={result.candidate_status} confirmed={result.confirmed_status} "
             f"accepted={accepted} reason={reason}"
@@ -315,6 +594,12 @@ def run_precision_screening(
         "reason": reason,
         "require_confirmed": require_confirmed,
         "allow_candidate": allow_candidate,
+        "accept_raw_drone_hit": accept_raw_drone_hit,
+        "entry_probability_threshold": entry_thr,
+        "require_raw_gate_passed": require_raw_gate_passed,
+        "raw_drone_hit": raw_drone_hit,
+        "raw_gate_passed_for_entry": raw_gate_passed_for_entry,
+        "strong_entry_hit": strong_entry_hit,
         "precision_blocks": blocks,
         "result": asdict(result),
     }
@@ -463,7 +748,11 @@ def run_one_scan_cycle(
     cycle_index: int = 1,
     verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    events = runtime.scanner.scan_once()
+    if bool(runtime.scan_candidate_cfg.get("enabled", False)):
+        events = _run_raw_gate_scan_once(runtime, verbose=verbose)
+    else:
+        events = runtime.scanner.scan_once()
+
     event_dicts: list[dict[str, Any]] = []
 
     if verbose:
@@ -482,10 +771,15 @@ def run_one_scan_cycle(
             continue
 
         if verbose:
+            trigger_name = (
+                "RAW_GATE_TRIGGER"
+                if bool(runtime.scan_candidate_cfg.get("enabled", False))
+                else "ENERGY_TRIGGER"
+            )
             print(
-                f"\n[ENERGY_TRIGGER] {event.center_freq / 1e9:.3f} GHz | "
-                f"max_fft_power={event.max_fft_power:.3e} | "
-                f"pass_count={event.pass_count}/{runtime.scan_blocks}"
+                f"\n[{trigger_name}] {event.center_freq / 1e9:.3f} GHz | "
+                f"score={getattr(event, 'best_score_max', getattr(event, 'max_fft_power', 0.0))} | "
+                f"pass_count={event.pass_count}/{getattr(event, 'usable_blocks', runtime.scan_blocks)}"
             )
 
         screening = run_precision_screening(
@@ -532,6 +826,7 @@ def run_one_scan_cycle(
         print(f"num events: {len(event_dicts)}")
         print(f"triggered events: {sum(1 for e in event_dicts if e['triggered'])}")
         print(f"cnn_enabled: {runtime.cnn_enabled}")
+        print(f"raw_gate_scan: {bool(runtime.scan_candidate_cfg.get('enabled', False))}")
         print(f"save_spectrogram: {runtime.save_spectrogram}")
         print(f"save_stft: {runtime.save_stft}")
 

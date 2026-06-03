@@ -56,3 +56,126 @@ energy_detector:
   # 현재 frame 개수 31개 기준:
   # 0.05는 대략 2개 이상의 frame이 탐지되면 block 탐지로 보는 수준
   min_detection_ratio: 0.05
+
+# 정규화 전 raw IQ 기반 noise gate
+#
+# 목적:
+# - CNN 입력 전에 DC 제거된 raw IQ의 실제 신호 세기를 먼저 확인한다.
+# - background가 spectrogram 정규화 후 Drone으로 오탐되는 것을 줄인다.
+# - gate를 통과한 block만 CNN temporal voting에 누적한다.
+#
+# 동작 원칙:
+# raw IQ block
+# -> DC offset removal
+# -> EnergyDetector(time_power)
+# -> 현재 gain의 noise_floor 조회
+# -> runtime_threshold = noise_floor * threshold_multiplier
+# -> score >= runtime_threshold 이면 CNN 허용
+#
+# 주의:
+# - noise_by_gain_latest.json의 profile["threshold"]는 사용하지 않는다.
+# - JSON의 noise_floor만 사용하고, multiplier는 여기 YAML에서 관리한다.
+raw_noise_gate:
+  enabled: true
+
+  # CLI gain-wise noise calibration 결과
+  noise_profile_path: outputs/calibration/noise_by_gain_latest.json
+
+  # calibration JSON과 같은 detector 방식 사용
+  detector_method: time_power
+  frame_size: 1024
+  hop_size: 512
+
+  # 현재 gain과 정확히 일치하는 profile이 없으면 가장 가까운 gain 사용
+  allow_nearest_gain: true
+
+  # JSON의 profile["threshold"]를 그대로 쓰지 않고,
+  # profile["noise_floor"] * threshold_multiplier 로 runtime에서 다시 계산
+  use_profile_threshold: false
+  threshold_source: noise_floor_times_yaml_multiplier
+
+  # 기본값. 보수적으로 5.0부터 시작.
+  # 오탐이 줄어드는지 먼저 확인하고, 미탐이 생기면 4.0 -> 3.5 -> 3.0 순서로 낮춘다.
+  threshold_multiplier: 5.0
+
+  # gain별 override.
+  # 현재는 전부 보수적으로 5.0으로 둔다.
+  # 실험 중 고 gain에서 드론이 gate에 막히면 35/40부터 낮추면 된다.
+  gain_threshold_multiplier:
+    "20": 5.0
+    "25": 5.0
+    "30": 5.0
+    "35": 5.0
+    "40": 5.0
+
+  # block 내부 energy frame 중 threshold를 넘은 frame 비율.
+  # calibration JSON의 min_detection_ratio와 맞춘다.
+  min_detection_ratio: 0.05
+
+  # gate 실패 시 처리
+  block_cnn_on_fail: true
+  reset_cnn_history_on_fail: true
+  block_aoa_on_fail: true
+
+  # 표시/로그용 label
+  pass_label: RAW_GATE_PASS
+  fail_label: GATE_LOW_BACKGROUND
+
+# ============================================================
+# Scan candidate selection using raw noise gate
+# ============================================================
+#
+# 목적:
+# - scan 단계에서는 STFT/CNN/AoA를 수행하지 않는다.
+# - 주파수별 raw IQ energy가 gain-wise noise floor보다 충분히 큰지만 본다.
+# - raw_noise_gate를 통과한 주파수만 candidate로 저장하고,
+#   candidate 주파수에서만 PrecisionAnalyzer가 CNN/AoA 검증을 수행한다.
+scan_candidate:
+  enabled: true
+
+  # scan 주파수 하나당 읽는 총 block 수
+  blocks_per_freq: 8
+
+  # 주파수 이동 직후 버릴 block 수
+  discard_blocks_after_tune: 4
+
+  # usable block 중 raw noise gate를 통과한 block이 이 개수 이상이면 후보 저장
+  min_raw_gate_pass_count: 1
+
+  # 후보가 너무 많으면 best_score_max 높은 순으로 상위 N개만 검증
+  # 0 또는 음수면 제한하지 않는다.
+  max_candidates: 5
+
+# ============================================================
+# Candidate verification using representative block selection
+# ============================================================
+#
+# 목적:
+# - scan_candidate에서 후보로 올라온 주파수만 정밀검사한다.
+# - 정밀검사에서는 여러 raw IQ block을 읽되, 모든 block을 CNN voting에 넣지 않는다.
+# - raw_noise_gate를 통과한 block 중 score_max가 가장 큰 대표 block 하나만 CNN/AoA에 넣는다.
+# - live_rf_viewer_drone_aoa.py에서 검증된 방식과 같은 구조다.
+candidate_verify:
+  enabled: true
+
+  # true면 PrecisionAnalyzer.analyze()에서 representative block 방식을 사용한다.
+  # false면 기존 analyze() 방식으로 fallback한다.
+  representative_selection: true
+
+  # 후보 주파수 정밀검사에서 읽을 block 수.
+  # 이 block들 중 대표 block 하나만 CNN voting에 들어간다.
+  blocks_per_decision: 10
+
+  # 대표 block 선택 정책.
+  # raw_gate_pass_score_max:
+  #   raw gate 통과 block이 있으면 그중 score_max 최대 block 선택.
+  #   통과 block이 없으면 전체 중 score_max 최대 block 선택.
+  select_policy: raw_gate_pass_score_max
+
+  # selected block이 raw gate fail이면 CNN/AoA를 막는다.
+  block_cnn_on_raw_gate_fail: true
+
+  # selected block raw gate fail 시 temporal history reset 여부.
+  # 대표 block 방식에서는 너무 공격적인 reset을 피하기 위해 기본 false.
+  reset_temporal_on_raw_gate_fail: false
+

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import yaml
 
 from src.preprocess import remove_dc_offset, normalize_iq
 from src.features.cnn_input import compute_runtime_cnn_spectrogram
@@ -21,6 +22,7 @@ from src.ml.runtime_decision import (
     select_drone_threshold,
     update_temporal_decision,
 )
+from src.runtime.raw_noise_gate import RawNoiseGate
 
 
 @dataclass
@@ -53,6 +55,22 @@ class PrecisionAnalysisResult:
     precision_blocks: int | None = None
     selected_block_index: int | None = None
     selection_score: float | None = None
+
+    raw_gate_enabled: bool | None = None
+    raw_gate_passed: bool | None = None
+    raw_gate_label: str | None = None
+    raw_gate_score_max: float | None = None
+    raw_gate_score_median: float | None = None
+    raw_gate_noise_floor: float | None = None
+    raw_gate_threshold: float | None = None
+    raw_gate_threshold_multiplier: float | None = None
+    raw_gate_detection_ratio: float | None = None
+    raw_gate_min_detection_ratio: float | None = None
+    raw_gate_matched_gain: float | None = None
+    raw_gate_matched_by: str | None = None
+    raw_gate_reason: str | None = None
+    representative_selection: bool | None = None
+    representative_policy: str | None = None
 
     drone_probability: float | None = None
     drone_threshold: float | None = None
@@ -147,6 +165,14 @@ class PrecisionAnalyzer:
         self.decision_cfg = decision_cfg
         self.current_gain = current_gain
 
+        self.project_root = Path(__file__).resolve().parents[2]
+        self.detect_config_path = self.project_root / "configs" / "detect.yaml"
+        self.candidate_verify_cfg = self._load_candidate_verify_cfg(self.detect_config_path)
+        self.raw_gate = RawNoiseGate(
+            detect_config_path=self.detect_config_path,
+            project_root=self.project_root,
+        )
+
         self.smoothing_enabled = bool(self.smoothing_cfg.get("enabled", False))
         self.smoothing_method = str(self.smoothing_cfg.get("method", "median")).lower().strip()
         self.smoothing_window = max(1, int(self.smoothing_cfg.get("window_size", 5)))
@@ -188,10 +214,78 @@ class PrecisionAnalyzer:
 
         raise AttributeError("receiver에서 center frequency를 설정할 방법을 찾지 못했습니다.")
 
+
+    def _is_cw_tone_like(
+        self,
+        iq_block: np.ndarray,
+        *,
+        peak_ratio_threshold: float = 0.55,
+        occupied_bins_threshold: int = 6,
+        rel_db_threshold: float = 20.0,
+    ) -> tuple[bool, float, int]:
+        """
+        Signal generator / CW tone reject용 간단한 detector.
+
+        판정 기준:
+        - FFT 전체 에너지 중 가장 큰 bin 하나가 차지하는 비율이 너무 큼
+        - peak 기준 -20 dB 이내 occupied bin 수가 너무 적음
+
+        이런 경우는 드론 통신 패턴이라기보다 단일 톤/신호발생기일 가능성이 높다.
+        """
+        arr = np.asarray(iq_block)
+
+        if arr.ndim == 2:
+            rx_index = int(getattr(self, "cnn_rx_index", 0))
+            rx_index = max(0, min(rx_index, arr.shape[0] - 1))
+            x = arr[rx_index]
+        else:
+            x = arr.reshape(-1)
+
+        x = np.asarray(x, dtype=np.complex64).reshape(-1)
+        if x.size <= 8:
+            return False, 0.0, 0
+
+        # DC offset 제거 후 FFT
+        x = x - np.mean(x)
+        mag2 = np.abs(np.fft.fftshift(np.fft.fft(x))) ** 2
+
+        total = float(np.sum(mag2) + 1e-12)
+        peak = float(np.max(mag2))
+        peak_ratio = peak / total
+
+        mag2_db = 10.0 * np.log10(mag2 + 1e-12)
+        peak_db = float(np.max(mag2_db))
+        occupied_bins = int(np.sum(mag2_db >= peak_db - float(rel_db_threshold)))
+
+        is_tone = (
+            peak_ratio >= float(peak_ratio_threshold)
+            and occupied_bins <= int(occupied_bins_threshold)
+        )
+
+        return bool(is_tone), float(peak_ratio), int(occupied_bins)
+
+
     def _fft_selection_score(self, cnn_iq: np.ndarray) -> float:
         x = np.asarray(cnn_iq).reshape(-1)
         fft_mag = np.abs(np.fft.fftshift(np.fft.fft(x)))
         return float(np.max(fft_mag ** 2))
+
+    def _read_iq_block_like_live_viewer(self) -> np.ndarray:
+        """
+        live_rf_viewer.py와 최대한 같은 수신 경로를 사용한다.
+
+        우선 receiver.read_block(num_samples)를 사용하고,
+        해당 메서드가 없으면 기존 read_samples(num_samples)로 fallback한다.
+        """
+        read_block = getattr(self.receiver, "read_block", None)
+        if callable(read_block):
+            return read_block(self.num_samples)
+
+        read_samples = getattr(self.receiver, "read_samples", None)
+        if callable(read_samples):
+            return read_samples(self.num_samples)
+
+        raise AttributeError("receiver has neither read_block() nor read_samples()")
 
     def _get_gain(self) -> float | None:
         get_gain = getattr(self.receiver, "get_gain", None)
@@ -266,6 +360,98 @@ class PrecisionAnalyzer:
 
         return smoothed, True, len(self.angle_history), None
 
+    @staticmethod
+    def _load_candidate_verify_cfg(path: Path) -> dict[str, Any]:
+        try:
+            if not path.exists():
+                return {}
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            return dict((data or {}).get("candidate_verify", {}) or {})
+        except Exception as exc:
+            print(f"[CANDIDATE_VERIFY WARN] failed to load {path}: {exc}")
+            return {}
+
+    def _candidate_verify_representative_enabled(self) -> bool:
+        cfg = self.candidate_verify_cfg or {}
+        return bool(cfg.get("enabled", False)) and bool(
+            cfg.get("representative_selection", False)
+        )
+
+    @staticmethod
+    def _safe_selection_float(value: Any, default: float = float("-inf")) -> float:
+        try:
+            if value is None or value == "":
+                return default
+            v = float(value)
+            if not np.isfinite(v):
+                return default
+            return v
+        except Exception:
+            return default
+
+    def _select_representative_precision_index(
+        self,
+        raw_gate_results: list[Any],
+        *,
+        policy: str,
+    ) -> int:
+        if not raw_gate_results:
+            raise ValueError("raw_gate_results is empty")
+
+        policy = str(policy or "raw_gate_pass_score_max").strip()
+        n = len(raw_gate_results)
+
+        if policy == "last":
+            return n - 1
+
+        if policy == "raw_gate_score_max":
+            return max(
+                range(n),
+                key=lambda i: self._safe_selection_float(raw_gate_results[i].score_max),
+            )
+
+        if policy == "raw_gate_pass_score_max":
+            passed_indices = [
+                i
+                for i, result in enumerate(raw_gate_results)
+                if bool((not result.enabled) or result.passed)
+            ]
+            if passed_indices:
+                return max(
+                    passed_indices,
+                    key=lambda i: self._safe_selection_float(raw_gate_results[i].score_max),
+                )
+            return max(
+                range(n),
+                key=lambda i: self._safe_selection_float(raw_gate_results[i].score_max),
+            )
+
+        raise ValueError(f"Unknown candidate_verify.select_policy: {policy}")
+
+    @staticmethod
+    def _apply_raw_gate_metadata_to_result(
+        result: PrecisionAnalysisResult,
+        raw_gate_result: Any,
+        *,
+        representative_policy: str,
+    ) -> PrecisionAnalysisResult:
+        result.raw_gate_enabled = bool(raw_gate_result.enabled)
+        result.raw_gate_passed = bool(raw_gate_result.passed)
+        result.raw_gate_label = str(raw_gate_result.label)
+        result.raw_gate_score_max = float(raw_gate_result.score_max)
+        result.raw_gate_score_median = float(raw_gate_result.score_median)
+        result.raw_gate_noise_floor = raw_gate_result.noise_floor
+        result.raw_gate_threshold = raw_gate_result.threshold
+        result.raw_gate_threshold_multiplier = float(raw_gate_result.threshold_multiplier)
+        result.raw_gate_detection_ratio = float(raw_gate_result.detection_ratio)
+        result.raw_gate_min_detection_ratio = float(raw_gate_result.min_detection_ratio)
+        result.raw_gate_matched_gain = raw_gate_result.matched_gain
+        result.raw_gate_matched_by = str(raw_gate_result.matched_by)
+        result.raw_gate_reason = str(raw_gate_result.reason)
+        result.representative_selection = True
+        result.representative_policy = str(representative_policy)
+        return result
+
     def reset_temporal_history(self) -> None:
         """Reset CNN temporal voting history.
 
@@ -320,6 +506,103 @@ class PrecisionAnalyzer:
         )
 
     def analyze(self, center_freq: float) -> PrecisionAnalysisResult:
+        if not self._candidate_verify_representative_enabled():
+            return self._analyze_legacy(center_freq)
+
+        self._set_center_freq(float(center_freq))
+
+        if self.settle_sec > 0:
+            time.sleep(self.settle_sec)
+
+        cfg = self.candidate_verify_cfg or {}
+        blocks_per_decision = max(
+            1,
+            int(cfg.get("blocks_per_decision", self.precision_blocks)),
+        )
+        policy = str(cfg.get("select_policy", "raw_gate_pass_score_max"))
+        block_cnn_on_fail = bool(cfg.get("block_cnn_on_raw_gate_fail", True))
+        reset_on_fail = bool(cfg.get("reset_temporal_on_raw_gate_fail", False))
+
+        current_gain = self._get_gain()
+        if current_gain is None:
+            current_gain = self.current_gain
+        if current_gain is None:
+            current_gain = 0.0
+
+        blocks: list[np.ndarray] = []
+        raw_gate_results: list[Any] = []
+
+        for _ in range(blocks_per_decision):
+            iq_raw = self._read_iq_block_like_live_viewer()
+            raw_gate_result = self.raw_gate.evaluate(iq_raw, gain=float(current_gain))
+            blocks.append(iq_raw)
+            raw_gate_results.append(raw_gate_result)
+
+        if not blocks:
+            result = self._empty_result(center_freq)
+            result.representative_selection = True
+            result.representative_policy = policy
+            return result
+
+        selected_idx = self._select_representative_precision_index(
+            raw_gate_results,
+            policy=policy,
+        )
+        selected_block = blocks[selected_idx]
+        selected_gate = raw_gate_results[selected_idx]
+        raw_gate_passed = bool((not selected_gate.enabled) or selected_gate.passed)
+
+        if selected_gate.enabled and (not raw_gate_passed) and block_cnn_on_fail:
+            if reset_on_fail:
+                self.reset_temporal_history()
+
+            result = self._empty_result(center_freq)
+            result.precision_blocks = int(blocks_per_decision)
+            result.selected_block_index = int(selected_idx)
+            result.selection_score = float(selected_gate.score_max)
+            result.cnn_label = "RAW_GATE_BLOCKED"
+            result.cnn_score = 0.0
+            result.drone_probability = 0.0
+            result.drone_threshold = (
+                select_drone_threshold(self.decision_cfg, current_gain)
+                if self.decision_cfg is not None
+                else None
+            )
+            result.final_decision = "RAW_GATE_BLOCKED"
+            result.aoa_skipped_reason = "raw_noise_gate_failed"
+            result.aoa_smoothing_rejected_reason = "raw_noise_gate_failed"
+            return self._apply_raw_gate_metadata_to_result(
+                result,
+                selected_gate,
+                representative_policy=policy,
+            )
+
+        original_reader = self._read_iq_block_like_live_viewer
+        original_precision_blocks = self.precision_blocks
+
+        def _read_selected_block_once() -> np.ndarray:
+            return np.asarray(selected_block)
+
+        self._read_iq_block_like_live_viewer = _read_selected_block_once  # type: ignore[method-assign]
+        self.precision_blocks = 1
+
+        try:
+            result = self._analyze_legacy(center_freq)
+        finally:
+            self._read_iq_block_like_live_viewer = original_reader  # type: ignore[method-assign]
+            self.precision_blocks = original_precision_blocks
+
+        result.precision_blocks = int(blocks_per_decision)
+        result.selected_block_index = int(selected_idx)
+        result.selection_score = float(selected_gate.score_max)
+
+        return self._apply_raw_gate_metadata_to_result(
+            result,
+            selected_gate,
+            representative_policy=policy,
+        )
+
+    def _analyze_legacy(self, center_freq: float) -> PrecisionAnalysisResult:
         self._set_center_freq(float(center_freq))
 
         if self.settle_sec > 0:
@@ -342,7 +625,7 @@ class PrecisionAnalyzer:
         final_decision = "NotDrone"
 
         for block_index in range(self.precision_blocks):
-            iq_raw = self.receiver.read_samples(self.num_samples)
+            iq_raw = self._read_iq_block_like_live_viewer()
             iq_dc = remove_dc_offset(iq_raw)
 
             iq = normalize_iq(iq_dc)
@@ -371,14 +654,29 @@ class PrecisionAnalyzer:
 
             cnn_result = None
 
-            if self.cnn_classifier is not None:
+            is_cw_tone, cw_peak_ratio, cw_occupied_bins = self._is_cw_tone_like(iq_raw)
+
+            if is_cw_tone:
+                # 신호발생기/CW 단일톤은 드론 후보에서 제외한다.
+                # binary CNN이 강한 단일 RF를 Drone으로 오탐하는 것을 막기 위한 전단 gate.
+                cnn_result = None
+                selection_score = 0.0
+                raw_vote = 0
+                print(
+                    f"  [CW_TONE_REJECT] peak_ratio={cw_peak_ratio:.3f} "
+                    f"occupied_bins={cw_occupied_bins} -> force NotDrone",
+                    flush=True,
+                )
+            elif self.cnn_classifier is not None:
                 cnn_result = self.cnn_classifier.predict(cnn_spectrogram)
                 selection_score = self._drone_probability(cnn_result)
             else:
                 selection_score = self._fft_selection_score(cnn_spectrogram)
 
             raw_vote = 0
-            if self.cnn_classifier is not None and drone_threshold is not None:
+            if is_cw_tone:
+                raw_vote = 0
+            elif self.cnn_classifier is not None and drone_threshold is not None:
                 raw_vote = int(float(selection_score) >= float(drone_threshold))
 
             if self.decision_cfg is not None and self.decision_cfg.temporal_voting.enabled:
