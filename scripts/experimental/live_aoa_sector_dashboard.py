@@ -141,6 +141,16 @@ class SectorDashboardRenderer:
 
         range_result = get_dashboard_range_result(dash_cfg, sector, selected_raw)
 
+        demo_cycle_enabled = bool(dash_cfg.get("demo_cycle", False))
+        demo_update_idx = int(time.monotonic() * 5.0)
+
+        sector, range_result = apply_demo_range_cycle(
+            sector=sector,
+            range_result=range_result,
+            update_idx=demo_update_idx,
+            enabled=demo_cycle_enabled,
+        )
+
         self._draw_title(canvas, paused=paused)
         self._draw_sector_fan_v2(
             canvas,
@@ -1265,6 +1275,69 @@ def format_range_features(range_result: dict[str, Any] | None) -> str:
     }
 
     return " + ".join(aliases.get(str(x), str(x)) for x in features)
+
+
+
+def apply_demo_range_cycle(
+    *,
+    sector: dict[str, Any],
+    range_result: dict[str, Any] | None,
+    update_idx: int,
+    enabled: bool,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """
+    UI visual self-test mode.
+
+    실제 CNN/AoA/sector 정책을 바꾸는 기능이 아니라,
+    dashboard 그림이 sector/range cell을 제대로 그리는지 보기 위한 표시 전용 override다.
+    """
+    if not enabled:
+        return sector, range_result
+
+    sectors = [
+        "LEFT_OUTER",
+        "LEFT_INNER",
+        "CENTER",
+        "RIGHT_INNER",
+        "RIGHT_OUTER",
+    ]
+
+    range_classes = [
+        ("WITHIN_9M", "<=9m", "range_bin"),
+        ("RANGE_9_TO_15M", "9-15m", "range_bin"),
+        ("SECTOR_ONLY", "full sector", "sector_only"),
+    ]
+
+    sector_name = sectors[(update_idx // 10) % len(sectors)]
+    range_class, label, display_mode = range_classes[(update_idx // 5) % len(range_classes)]
+
+    demo_sector = dict(sector)
+    demo_sector.update(
+        {
+            "sector_status": "trusted",
+            "locked_sector_name": sector_name,
+            "instant_sector_name": sector_name,
+            "valid_aoa_count": 4,
+            "reason": "demo_cycle",
+        }
+    )
+
+    demo_range = {
+        "range_class": range_class,
+        "range_label_ko": label,
+        "display_mode": display_mode,
+        "sector_fill": display_mode == "sector_only",
+        "confidence": "DEMO",
+        "reliability": "DEMO",
+        "score": 0.0,
+        "threshold": 0.0,
+        "margin": 1.0,
+        "features_used": ["demo"],
+        "enabled": True,
+        "reason": "demo_cycle",
+    }
+
+    return demo_sector, demo_range
 
 
 def handle_key(

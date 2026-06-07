@@ -99,6 +99,7 @@ live_rf_viewer:
 # - CNN / RawNoiseGate / AoA / coherence / sector 판단 정책은 바꾸지 않는다.
 # - 이 dashboard는 기존 판단 결과를 받아서 시각화만 한다.
 sector_dashboard:
+  demo_cycle: false
   enabled: true
 
   show_spectrogram: false
