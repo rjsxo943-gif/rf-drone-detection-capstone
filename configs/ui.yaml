@@ -68,3 +68,59 @@ live_rf_viewer:
   # true면 터미널 주기 로그 비활성화.
   disable_cli_log: false
 
+  # ==========================================================
+  # AoA display gate
+  # ==========================================================
+  # detection_confirmed와 AoA 표시 조건을 분리한다.
+  #
+  # 목적:
+  # - CNN voting confirmed 상태가 유지되더라도,
+  #   현재 selected block이 NotDrone이면 AoA를 표시하지 않는다.
+  # - coherence가 낮은 위상 불안정 block은 각도 표시에서 제외한다.
+  #
+  # 권장:
+  # - 시연/보고서용: min_current_confidence=0.90~0.95, min_coherence=0.90
+  # - 실험/튜닝용:   min_current_confidence=0.85,      min_coherence=0.85
+  aoa_gate:
+    enabled: true
+    require_voting_confirmed: true
+    require_current_drone: true
+    min_current_confidence: 0.90
+    min_coherence: 0.70
+    display_only_valid: true
+    show_skip_reason: true
+
+# ============================================================
+# OpenCV Sector Dashboard
+# ============================================================
+# scripts/experimental/live_aoa_sector_dashboard.py 전용 표시 설정.
+#
+# 원칙:
+# - CNN / RawNoiseGate / AoA / coherence / sector 판단 정책은 바꾸지 않는다.
+# - 이 dashboard는 기존 판단 결과를 받아서 시각화만 한다.
+sector_dashboard:
+  enabled: true
+
+  show_spectrogram: false
+
+  show_sector: true
+  show_angle_text: true
+  show_coherence: true
+  show_p99: true
+  p99_source: median_raw_p99
+
+  sector_display_mode: seven
+
+  blink_on_hold: true
+  fade_on_signal_lost: true
+
+  canvas_width: 1320
+  canvas_height: 720
+
+  distance:
+    enabled: true
+    show_rings: false
+    profile_path: outputs/sector_range_profiles/gain35_cf2450000000_nearfar_profile.json
+    mode: within9m_vs_9to15m_experimental
+    min_reliability: LOW
+    min_margin_for_range: 0.25
