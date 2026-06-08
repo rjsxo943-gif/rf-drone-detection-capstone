@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import runpy
 
 from src.runtime.cnn_capture_actions import run_cnn_capture_action
 from src.runtime.rf4_actions import run_rf4_single_block_action
@@ -11,6 +12,7 @@ from src.calibration import (
     load_phase_gain_by_gain_calibration,
 )
 from src.runtime.scan_loop import run_continuous_scan_loop
+from src.runtime.opencv_scan_precision_runtime import run_opencv_scan_precision_runtime
 from src.runtime.calibration_actions import (
     DEFAULT_GAIN_LIST,
     DEFAULT_GAIN_NOISE_OUTPUT,
@@ -25,6 +27,8 @@ STATUS_COMMANDS = {"c", "status"}
 NOISE_COMMANDS = {"n", "noise"}
 PHASE_COMMANDS = {"p", "phase", "phase_gain"}
 PIPELINE_COMMANDS = {"s", "start", "run", "pipeline", "a", "aoa"}
+TERMINAL_PIPELINE_COMMANDS = {"t", "terminal", "terminal_loop", "scan_loop"}
+DEMO_COMMANDS = {"v", "view", "viewer", "demo", "ui_demo"}
 CAPTURE_COMMANDS = {"d", "dataset", "capture"}
 RF4_COMMANDS = {"r", "rf4"}
 
@@ -125,7 +129,9 @@ def print_menu() -> None:
     print("[c] status        : calibration / pipeline 현재 상태창")
     print("[n] noise         : gain-wise noise calibration")
     print("[p] phase         : gain-wise phase/gain calibration")
-    print("[s] start         : integrated scan/runtime pipeline 구동")
+    print("[s] start         : 실제 Pluto+ OpenCV SCAN + PRECISION runtime 구동")
+    print("[v] view/demo     : Pluto 없이 OpenCV UI demo 구동")
+    print("[t] terminal-loop : 기존 terminal scan/runtime pipeline 구동")
     print("[d] dataset       : CNN dataset capture")
     print("[r] rf4           : RF4 single block inference")
     print("[q] quit/shutdown : receiver close 후 종료")
@@ -133,7 +139,56 @@ def print_menu() -> None:
 
 def _run_pipeline_start_action() -> None:
     print()
-    print("=== Integrated Scan/Runtime Pipeline Start ===")
+    print("=== OpenCV SCAN + PRECISION UI Start ===")
+    print("흐름: CLI [s] → OpenCV UI → SCAN rail → PRECISION sector dashboard")
+    print("중단: OpenCV 창에서 q 또는 ESC")
+    print()
+    print_calibration_status()
+
+    try:
+        return_code = run_opencv_scan_precision_runtime(
+            config_dir="configs",
+            stop_key="q",
+            verbose=True,
+        )
+
+        if return_code != 0:
+            print(f"[WARN] OpenCV runtime finished with non-zero return code: {return_code}")
+
+    except SystemExit as e:
+        code = e.code
+        if code not in (None, 0):
+            print(f"[WARN] OpenCV UI finished with non-zero return code: {code}")
+
+    except Exception as e:
+        print(f"[ERROR] OpenCV UI failed: {e}")
+
+
+def _run_opencv_demo_action() -> None:
+    print()
+    print("=== OpenCV SCAN + PRECISION UI Demo ===")
+    print("Pluto+ 없이 UI 동작만 확인합니다.")
+    print("중단: OpenCV 창에서 q 또는 ESC")
+    print()
+
+    try:
+        runpy.run_path(
+            "scripts/experimental/test_scan_precision_rail_demo.py",
+            run_name="__main__",
+        )
+
+    except SystemExit as e:
+        code = e.code
+        if code not in (None, 0):
+            print(f"[WARN] OpenCV demo finished with non-zero return code: {code}")
+
+    except Exception as e:
+        print(f"[ERROR] OpenCV demo failed: {e}")
+
+
+def _run_terminal_pipeline_action() -> None:
+    print()
+    print("=== Terminal Integrated Scan/Runtime Pipeline Start ===")
     print("흐름: Scan → Candidate → Precision CNN → Coherence/AoA/Sector → Logging")
     print("중단: scan cycle 사이에 q 입력 후 Enter, 또는 Ctrl+C")
     print()
@@ -301,6 +356,12 @@ def run_cli() -> None:
                 num_blocks_per_gain=num_blocks,
             )
             print_calibration_status()
+
+        elif cmd in DEMO_COMMANDS:
+            _run_opencv_demo_action()
+
+        elif cmd in TERMINAL_PIPELINE_COMMANDS:
+            _run_terminal_pipeline_action()
 
         elif cmd in PIPELINE_COMMANDS:
             _run_pipeline_start_action()

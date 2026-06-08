@@ -20,6 +20,7 @@ from src.preprocess.dc_blocker import remove_dc_offset
 from src.runtime.raw_noise_gate import RawNoiseGate
 from src.viewer import ViewerState, compute_raw_features
 from src.viewer.sector_range_estimator import SectorRangeEstimator
+from src.viewer.scan_rail import draw_scan_rail
 
 
 def load_dashboard_cfg(args: Any) -> dict[str, Any]:
@@ -131,13 +132,24 @@ class SectorDashboardRenderer:
         cnn_drone_count: int,
         topk_count: int,
         paused: bool = False,
+        scan_rail: dict[str, Any] | None = None,
     ) -> str | None:
         import cv2
 
         self._sleep_to_limit_fps()
 
-        canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        rail_width = 0
+        if scan_rail is not None:
+            try:
+                rail_width = int(scan_rail.get("rail_width", 190))
+            except Exception:
+                rail_width = 190
+            rail_width = max(140, rail_width)
+
+        canvas = np.zeros((self.height, self.width + rail_width, 3), dtype=np.uint8)
         canvas[:] = (16, 16, 18)
+
+        precision_canvas = canvas[:, rail_width:] if rail_width > 0 else canvas
 
         range_result = get_dashboard_range_result(dash_cfg, sector, selected_raw)
 
@@ -151,16 +163,16 @@ class SectorDashboardRenderer:
             enabled=demo_cycle_enabled,
         )
 
-        self._draw_title(canvas, paused=paused)
+        self._draw_title(precision_canvas, paused=paused)
         self._draw_sector_fan_v2(
-            canvas,
+            precision_canvas,
             args=args,
             sector=sector,
             range_result=range_result,
             paused=paused,
         )
         self._draw_text_panel(
-            canvas,
+            precision_canvas,
             state=state,
             args=args,
             dash_cfg=dash_cfg,
@@ -172,7 +184,10 @@ class SectorDashboardRenderer:
             topk_count=topk_count,
             paused=paused,
         )
-        self._draw_footer(canvas)
+        self._draw_footer(precision_canvas)
+
+        if scan_rail is not None and rail_width > 0:
+            draw_scan_rail(canvas, scan_rail, rail_width=rail_width)
 
         cv2.imshow(self.window_name, canvas)
         key = cv2.waitKey(1) & 0xFF
