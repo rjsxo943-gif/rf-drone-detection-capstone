@@ -1,51 +1,75 @@
 aoa_sector:
   active_preset: fixed_bins_7sector
-
   runtime:
     blocks_per_update: 20
     top_k: 5
     select_policy: raw_gate_pass_score_max
     voting_update_policy: one_vote_per_update
     mode: sector
-
   quality_gate:
     require_aoa_valid: true
     require_coherence_passed: false
-    min_stft_coherence: 0.70
-    min_cnn_confidence: 0.80
+    min_stft_coherence: 0.7
+    min_cnn_confidence: 0.8
     valid_angle_min_deg: -60
     valid_angle_max_deg: 60
-
   hold:
     hold_previous_when_no_consensus: true
     hold_max_updates: 8
     no_signal_clear_updates: 10
-
   profile_save:
     enabled: true
     output_dir: outputs/aoa_sector_profiles
-
   presets:
     fixed_bins_7sector:
       mode: fixed_bins
       min_valid_aoa_candidates: 2
       dominant_sector_min_count: 2
-      dominant_sector_min_ratio: 0.60
+      dominant_sector_min_ratio: 0.6
       bins:
-        - {name: L60,    min_deg: -60, max_deg: -45, label_deg: -60}
-        - {name: L45,    min_deg: -45, max_deg: -30, label_deg: -45}
-        - {name: L30,    min_deg: -30, max_deg: -15, label_deg: -30}
-        - {name: CENTER, min_deg: -15, max_deg: 15,  label_deg: 0}
-        - {name: R30,    min_deg: 15,  max_deg: 30,  label_deg: 30}
-        - {name: R45,    min_deg: 30,  max_deg: 45,  label_deg: 45}
-        - {name: R60,    min_deg: 45,  max_deg: 60,  label_deg: 60}
-
+      - name: LEFT_60_45
+        min_deg: -60
+        max_deg: -45
+        label_deg: -52.5
+      - name: LEFT_45_30
+        min_deg: -45
+        max_deg: -30
+        label_deg: -37.5
+      - name: LEFT_30_15
+        min_deg: -30
+        max_deg: -15
+        label_deg: -22.5
+      - name: CENTER
+        min_deg: -15
+        max_deg: 15
+        label_deg: 0
+      - name: RIGHT_15_30
+        min_deg: 15
+        max_deg: 30
+        label_deg: 22.5
+      - name: RIGHT_30_45
+        min_deg: 30
+        max_deg: 45
+        label_deg: 37.5
+      - name: RIGHT_45_60
+        min_deg: 45
+        max_deg: 60
+        label_deg: 52.5
     fixed_bins_3way:
       mode: fixed_bins
       min_valid_aoa_candidates: 2
       dominant_sector_min_count: 2
-      dominant_sector_min_ratio: 0.60
+      dominant_sector_min_ratio: 0.6
       bins:
-        - {name: LEFT,   min_deg: -60, max_deg: -20, label_deg: -40}
-        - {name: CENTER, min_deg: -20, max_deg: 20,  label_deg: 0}
-        - {name: RIGHT,  min_deg: 20,  max_deg: 60,  label_deg: 40}
+      - name: LEFT
+        min_deg: -60
+        max_deg: -20
+        label_deg: -40
+      - name: CENTER
+        min_deg: -20
+        max_deg: 20
+        label_deg: 0
+      - name: RIGHT
+        min_deg: 20
+        max_deg: 60
+        label_deg: 40

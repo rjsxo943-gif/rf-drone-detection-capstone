@@ -288,6 +288,7 @@ def apply_yaml_defaults(args: argparse.Namespace) -> argparse.Namespace:
     aoa_cfg = configs.get("aoa", {}) or {}
     ui_cfg = configs.get("ui", {}) or {}
     live_rf_viewer_cfg = ui_cfg.get("live_rf_viewer", {}) or {}
+    aoa_gate_cfg = live_rf_viewer_cfg.get("aoa_gate", {}) or {}
 
     stft_cfg = ml_cfg.get("stft", {}) or {}
     spectrogram_cfg = ml_cfg.get("spectrogram", {}) or {}
@@ -386,6 +387,29 @@ def apply_yaml_defaults(args: argparse.Namespace) -> argparse.Namespace:
         if disable_cli_log is not None:
             args.disable_cli_log = bool(disable_cli_log)
 
+    # AoA display gate.
+    # detection_confirmed와 AoA 표시 조건을 분리한다.
+    # confirmed=True가 유지 중이어도 현재 selected block이 NotDrone이면 AoA를 막는다.
+    args.aoa_gate_enabled = bool(aoa_gate_cfg.get("enabled", True))
+    args.aoa_require_voting_confirmed = bool(
+        aoa_gate_cfg.get("require_voting_confirmed", True)
+    )
+    args.aoa_require_current_drone = bool(
+        aoa_gate_cfg.get("require_current_drone", True)
+    )
+    args.aoa_min_current_confidence = float(
+        aoa_gate_cfg.get("min_current_confidence", 0.90)
+    )
+    args.aoa_min_display_coherence = float(
+        aoa_gate_cfg.get("min_coherence", 0.90)
+    )
+    args.aoa_display_only_valid = bool(
+        aoa_gate_cfg.get("display_only_valid", True)
+    )
+    args.aoa_show_skip_reason = bool(
+        aoa_gate_cfg.get("show_skip_reason", True)
+    )
+
     # Normalize and validate values after YAML defaults are applied.
     args.blocks_per_update = max(1, int(args.blocks_per_update))
     args.cli_log_every_n = max(1, int(args.cli_log_every_n))
@@ -424,6 +448,13 @@ def apply_yaml_defaults(args: argparse.Namespace) -> argparse.Namespace:
     print(f"positive_class  : {args.cnn_positive_class_names}")
     print(f"cnn_threshold   : {args.cnn_confidence_threshold}")
     print(f"cnn_voting      : window={args.cnn_smooth_window}, confirmed={args.cnn_confirm_votes}")
+    print(
+        "aoa_gate       : "
+        f"enabled={args.aoa_gate_enabled} "
+        f"cur_drone={args.aoa_require_current_drone} "
+        f"min_conf={args.aoa_min_current_confidence} "
+        f"min_coh={args.aoa_min_display_coherence}"
+    )
     print(f"raw_overload_th : {args.overload_threshold}")
     print("=========================================")
 
@@ -450,6 +481,108 @@ def build_cnn_runtime(args: argparse.Namespace) -> CNNRuntime:
         dummy_confidence=float(args.cnn_dummy_confidence),
     )
 
+
+
+
+def _positive_class_set(args: argparse.Namespace) -> set[str]:
+    return {
+        item.strip().lower()
+        for item in str(args.cnn_positive_class_names).split(",")
+        if item.strip()
+    }
+
+
+def _is_current_cnn_drone(
+    cnn_result: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> bool:
+    if not cnn_result:
+        return False
+
+    raw_class = str(cnn_result.get("cnn_raw_class_name", "")).strip().lower()
+    return raw_class in _positive_class_set(args)
+
+
+def _current_cnn_confidence(cnn_result: dict[str, Any] | None) -> float:
+    if not cnn_result:
+        return 0.0
+
+    try:
+        return float(cnn_result.get("cnn_raw_confidence", 0.0))
+    except Exception:
+        return 0.0
+
+
+def check_aoa_pre_gate(
+    cnn_result: dict[str, Any] | None,
+    raw_gate_blocks_aoa: bool,
+    args: argparse.Namespace,
+) -> tuple[bool, str]:
+    """
+    AoA 계산 전 gate.
+
+    핵심:
+    - cnn_confirmed=True는 최근 voting 상태다.
+    - 현재 selected block의 raw CNN 결과가 NotDrone이면 AoA를 열지 않는다.
+    - 그래서 NotDrone block이 이전 Drone voting 상태를 상속해서 AoA를 여는 문제를 막는다.
+    """
+    if not getattr(args, "aoa_gate_enabled", True):
+        return True, "gate_disabled"
+
+    if raw_gate_blocks_aoa:
+        return False, "raw_noise_gate_failed"
+
+    if getattr(args, "aoa_require_voting_confirmed", True):
+        if not (cnn_result is not None and bool(cnn_result.get("cnn_confirmed", False))):
+            return False, "cnn_not_confirmed"
+
+    if getattr(args, "aoa_require_current_drone", True):
+        if not _is_current_cnn_drone(cnn_result, args):
+            return False, "current_not_drone"
+
+    conf = _current_cnn_confidence(cnn_result)
+    min_conf = float(getattr(args, "aoa_min_current_confidence", 0.90))
+    if conf < min_conf:
+        return False, f"low_current_conf:{conf:.3f}<{min_conf:.3f}"
+
+    return True, "pass"
+
+
+def apply_aoa_post_gate(
+    aoa_result: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """
+    AoA 계산 후 coherence gate.
+
+    AoA는 계산해야 coherence를 알 수 있으므로,
+    계산 후 coherence가 낮으면 valid=False 처리하고 화면 표시를 막는다.
+    """
+    if not aoa_result:
+        return aoa_result
+
+    coh_value = aoa_result.get(
+        "stft_coherence",
+        aoa_result.get("coherence_like", None),
+    )
+    if coh_value is None:
+        return aoa_result
+
+    try:
+        coh = float(coh_value)
+    except Exception:
+        return aoa_result
+
+    min_coh = float(getattr(args, "aoa_min_display_coherence", 0.90))
+    if coh < min_coh:
+        aoa_result["aoa_gated"] = True
+        aoa_result["aoa_valid"] = False
+        aoa_result["aoa_skipped_reason"] = f"low_coherence:{coh:.3f}<{min_coh:.3f}"
+
+        if bool(getattr(args, "aoa_display_only_valid", True)):
+            aoa_result["aoa_angle_deg"] = float("nan")
+
+    return aoa_result
 
 def build_aoa_runtime(args: argparse.Namespace) -> AoARuntime:
     if args.num_channels < 2:
@@ -718,52 +851,89 @@ def build_overlay(
     calibration_status: str | None = None,
     raw_gate_status: str | None = None,
 ) -> list[str]:
-    lines = [
-        f"mode={state.mode} idx={state.update_index} {'PAUSED' if state.paused else 'LIVE'}",
-        f"cf={state.center_freq / 1e6:.3f} MHz sr={state.sample_rate / 1e6:.3f} MS/s gain={state.gain:.1f} dB",
-        f"raw_p99={raw.get('raw_abs_p99', 0.0):.4g} rms={raw.get('raw_rms', 0.0):.4g} max={raw.get('raw_abs_max', 0.0):.4g}",
-        f"frame_power_p99={raw.get('frame_power_p99', 0.0):.4g} overload={raw.get('overloaded', False)}",
-        f"selected={raw.get('selected_block_index', 0)}/{raw.get('blocks_per_update', 1)} policy={raw.get('select_policy', 'n/a')}",
-        "keys: q quit | p pause | [/] gain | s profile",
+    """
+    Compact OpenCV side overlay.
+
+    OpenCV right panel is not a full log view.
+    Keep only field-critical information so AOA never falls below the visible area.
+    Detailed values remain in CLI/CSV.
+    """
+
+    def short(text: Any, max_len: int = 58) -> str:
+        value = str(text)
+        if len(value) <= max_len:
+            return value
+        return value[: max_len - 3] + "..."
+
+    live_state = "PAUSED" if state.paused else "LIVE"
+
+    lines: list[str] = [
+        f"[RF] idx={state.update_index} {live_state} {state.mode}",
+        f"cf={state.center_freq / 1e6:.3f}M sr={state.sample_rate / 1e6:.3f}M g={state.gain:.1f}",
+        f"[RAW] sel={raw.get('selected_block_index', 0)}/{raw.get('blocks_per_update', 1)} p99={_fmt_cli_value(raw.get('raw_abs_p99'), 4)} rms={_fmt_cli_value(raw.get('raw_rms'), 4)}",
+        f"max={_fmt_cli_value(raw.get('raw_abs_max'), 4)} fp99={_fmt_cli_value(raw.get('frame_power_p99'), 4)} ov={bool(raw.get('overloaded', False))}",
     ]
-    if state.distance_m > 0:
-        lines.append(f"distance={state.distance_m:.2f} m")
-    if state.memo:
-        lines.append(f"memo={state.memo}")
-    if profile_status:
-        lines.append(profile_status)
-    if profile_summaries:
-        lines.extend(format_profile_summary_lines(profile_summaries))
-    if log_status:
-        lines.append(log_status)
-    if calibration_status:
-        lines.append(calibration_status)
-    if raw_gate_status:
-        lines.append(raw_gate_status)
-    if cnn_result:
-        raw_class = cnn_result.get("cnn_raw_class_name", "Unknown")
-        raw_conf = float(cnn_result.get("cnn_raw_confidence", 0.0))
-        smooth_class = cnn_result.get("cnn_smoothed_class_name", "Unknown")
-        smooth_conf = float(cnn_result.get("cnn_smoothed_confidence", 0.0))
-        votes = int(cnn_result.get("cnn_positive_votes", 0))
-        needed = int(cnn_result.get("cnn_confirm_votes", 0))
-        confirmed = bool(cnn_result.get("cnn_confirmed", False))
-        lines.append(
-            f"CNN raw={raw_class} conf={raw_conf:.3f} "
-            f"smooth={smooth_class} avg={smooth_conf:.3f}"
-        )
-        lines.append(f"CNN candidate_votes={votes}/{needed} confirmed={confirmed}")
+
+    if bool(raw.get("overloaded", False)):
+        lines.append("[WARN] OVERLOAD -> TRY_LOWER_GAIN")
+
+    # AOA must stay near the top.
     if aoa_result:
-        angle = aoa_result.get("aoa_angle_deg", float("nan"))
-        phase = aoa_result.get("phase_diff_corrected_deg", float("nan"))
-        coh = aoa_result.get("stft_coherence", aoa_result.get("coherence_like", float("nan")))
-        passed = aoa_result.get("stft_coherence_passed", "n/a")
-        offset = aoa_result.get("phase_offset_to_apply_deg", 0.0)
+        skip_reason = aoa_result.get("aoa_skipped_reason", "")
+        if skip_reason:
+            lines.append(f"[AOA] skip={short(skip_reason, 48)}")
+        else:
+            angle = aoa_result.get("aoa_angle_deg", float("nan"))
+            coh = aoa_result.get(
+                "stft_coherence",
+                aoa_result.get("coherence_like", float("nan")),
+            )
+            valid = bool(aoa_result.get("aoa_valid", False))
+            phase = aoa_result.get("phase_diff_corrected_deg", float("nan"))
+            lines.append(
+                f"[AOA] { _fmt_cli_value(angle, 3)}deg "
+                f"valid={valid} coh={_fmt_cli_value(coh, 3)}"
+            )
+            lines.append(f"phase={_fmt_cli_value(phase, 3)}deg")
+    else:
+        lines.append("[AOA] n/a")
+
+    if cnn_result:
         lines.append(
-            f"AOA angle={angle:.2f} deg phase={phase:.2f} deg "
-            f"coh={coh:.3f} pass={passed}"
+            f"[CNN] {cnn_result.get('cnn_raw_class_name', 'Unknown')} "
+            f"conf={_fmt_cli_value(cnn_result.get('cnn_raw_confidence'), 3)}"
         )
-        lines.append(f"AOA offset={offset:.2f} deg valid={aoa_result.get('aoa_valid', False)}")
+        lines.append(
+            f"[VOTE] {cnn_result.get('cnn_smoothed_class_name', 'Unknown')} "
+            f"{int(cnn_result.get('cnn_positive_votes', 0))}/"
+            f"{int(cnn_result.get('cnn_confirm_votes', 0))} "
+            f"ok={bool(cnn_result.get('cnn_confirmed', False))}"
+        )
+
+    if raw_gate_status:
+        lines.append(f"[GATE] {short(raw_gate_status, 60)}")
+
+    if calibration_status:
+        lines.append(f"[CAL] {short(calibration_status, 60)}")
+
+    if state.distance_m > 0:
+        lines.append(f"[META] d={state.distance_m:.2f}m")
+    if state.memo:
+        lines.append(f"memo={short(state.memo, 50)}")
+
+    # Do not dump profile summaries on OpenCV; they push AOA/CNN out of view.
+    # Keep only a compact profile status line.
+    if profile_status:
+        lines.append(f"[PROFILE] {short(profile_status, 54)}")
+
+    lines.append("q quit | p pause | [/] gain | s profile")
+
+    # Hard cap for OpenCV readability.
+    # CLI/CSV still preserve full details.
+    max_lines = 13
+    if len(lines) > max_lines:
+        lines = lines[: max_lines - 1] + ["... see CLI/CSV for details"]
+
     return lines
 
 
@@ -900,14 +1070,27 @@ def format_cli_status_line(
     raw_gate_result: Any | None = None,
     calibration_noise_result: Any | None = None,
 ) -> str:
-    parts: list[str] = []
+    """
+    Grouped CLI status output.
 
-    parts.append(
+    OpenCV overlay is compact.
+    CLI keeps detailed grouped values for debugging.
+    """
+    lines: list[str] = []
+
+    lines.append(
         "[RF] "
         f"idx={state.update_index} "
         f"mode={state.mode} "
         f"gain={state.gain:.1f} "
+        f"cf={state.center_freq / 1e6:.3f}MHz "
+        f"sr={state.sample_rate / 1e6:.3f}MS/s"
+    )
+
+    lines.append(
+        "[RAW] "
         f"sel={raw.get('selected_block_index', 0)}/{raw.get('blocks_per_update', 1)} "
+        f"policy={raw.get('select_policy', 'n/a')} "
         f"raw_p99={_fmt_cli_value(raw.get('raw_abs_p99'), 4)} "
         f"rms={_fmt_cli_value(raw.get('raw_rms'), 4)} "
         f"max={_fmt_cli_value(raw.get('raw_abs_max'), 4)} "
@@ -915,9 +1098,12 @@ def format_cli_status_line(
         f"overload={bool(raw.get('overloaded', False))}"
     )
 
+    if bool(raw.get("overloaded", False)):
+        lines.append("[WARNING] status=OVERLOAD suggestion=TRY_LOWER_GAIN")
+
     if raw_gate_result is not None:
-        parts.append(
-            "RAW_GATE="
+        lines.append(
+            "[RAW_GATE] "
             f"{raw_gate_result.label} "
             f"pass={bool(raw_gate_result.passed)} "
             f"score={_fmt_cli_value(raw_gate_result.score_max, 4)} "
@@ -930,18 +1116,21 @@ def format_cli_status_line(
         )
 
     if calibration_noise_result is not None:
-        parts.append(
-            "CAL="
+        lines.append(
+            "[CAL] "
             f"thr={_fmt_cli_value(calibration_noise_result.threshold, 4)} "
             f"raw={calibration_noise_result.raw_safety_status} "
             f"sat={_fmt_cli_value(calibration_noise_result.raw_saturation_ratio * 100, 4)}%"
         )
 
     if cnn_result:
-        parts.append(
-            "CNN="
-            f"{cnn_result.get('cnn_raw_class_name', 'Unknown')} "
-            f"conf={_fmt_cli_value(cnn_result.get('cnn_raw_confidence'), 3)} "
+        lines.append(
+            "[CNN] "
+            f"raw={cnn_result.get('cnn_raw_class_name', 'Unknown')} "
+            f"conf={_fmt_cli_value(cnn_result.get('cnn_raw_confidence'), 3)}"
+        )
+        lines.append(
+            "[CNN_VOTE] "
             f"smooth={cnn_result.get('cnn_smoothed_class_name', 'Unknown')} "
             f"avg={_fmt_cli_value(cnn_result.get('cnn_smoothed_confidence'), 3)} "
             f"votes={int(cnn_result.get('cnn_positive_votes', 0))}/"
@@ -952,16 +1141,18 @@ def format_cli_status_line(
     if aoa_result:
         skip_reason = aoa_result.get("aoa_skipped_reason", "")
         if skip_reason:
-            parts.append(f"AOA=skip:{skip_reason}")
+            lines.append(f"[AOA] skip={skip_reason}")
         else:
-            parts.append(
-                "AOA="
+            lines.append(
+                "[AOA] "
                 f"angle={_fmt_cli_value(aoa_result.get('aoa_angle_deg'), 3)}deg "
                 f"valid={bool(aoa_result.get('aoa_valid', False))} "
-                f"coh={_fmt_cli_value(aoa_result.get('stft_coherence', aoa_result.get('coherence_like')), 3)}"
+                f"coh={_fmt_cli_value(aoa_result.get('stft_coherence', aoa_result.get('coherence_like')), 3)} "
+                f"phase={_fmt_cli_value(aoa_result.get('phase_diff_corrected_deg'), 3)}deg"
             )
 
-    return " | ".join(parts)
+    return "\n".join(lines)
+
 
 
 def handle_key(
@@ -1209,29 +1400,30 @@ def run() -> int:
                     profile_status = f"PROFILE saved {summary.get('captured_blocks')} blocks"
 
             # Drone-gated AoA:
-            # AoA is computed only after CNN temporal voting confirms Drone.
-            # This prevents displaying/using AoA for background, signal generator,
-            # Wi-Fi, Bluetooth, or other non-drone RF sources.
+            # detection confirmed와 AoA 표시 조건을 분리한다.
+            # AoA는 다음 조건을 모두 만족할 때만 계산/표시한다.
+            #   1) CNN temporal voting confirmed
+            #   2) 현재 selected block의 raw CNN 결과도 Drone
+            #   3) 현재 CNN confidence가 YAML 기준 이상
+            #   4) raw gate가 AoA를 막지 않음
+            # 계산 후 coherence가 낮으면 angle 표시를 무효화한다.
             aoa_result = None
-            drone_aoa_gate_passed = bool(
-                cnn_result is not None
-                and bool(cnn_result.get("cnn_confirmed", False))
-                and not raw_gate_blocks_aoa
-            )
-
-            if aoa_runtime is not None and drone_aoa_gate_passed:
-                aoa_result = aoa_runtime.process(last_iq)
-            elif aoa_runtime is not None:
-                skip_reason = (
-                    "raw_noise_gate_failed"
-                    if raw_gate_blocks_aoa
-                    else "cnn_not_confirmed"
+            if aoa_runtime is not None:
+                aoa_pre_ok, aoa_skip_reason = check_aoa_pre_gate(
+                    cnn_result=cnn_result,
+                    raw_gate_blocks_aoa=raw_gate_blocks_aoa,
+                    args=args,
                 )
-                aoa_result = {
-                    "aoa_gated": True,
-                    "aoa_skipped_reason": skip_reason,
-                    "aoa_valid": False,
-                }
+
+                if aoa_pre_ok:
+                    aoa_result = aoa_runtime.process(last_iq)
+                    aoa_result = apply_aoa_post_gate(aoa_result, args)
+                else:
+                    aoa_result = {
+                        "aoa_gated": True,
+                        "aoa_skipped_reason": aoa_skip_reason,
+                        "aoa_valid": False,
+                    }
 
             log_status = None
             if args.mode == "full" and not args.disable_log:
