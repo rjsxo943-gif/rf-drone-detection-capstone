@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from src.runtime.fixed2450_precision_runtime import run_fixed2450_precision_runtime
 import re
 import runpy
+import sys
 
 from src.runtime.cnn_capture_actions import run_cnn_capture_action
 from src.runtime.rf4_actions import run_rf4_single_block_action
@@ -13,6 +15,7 @@ from src.calibration import (
 )
 from src.runtime.scan_loop import run_continuous_scan_loop
 from src.runtime.opencv_scan_precision_runtime import run_opencv_scan_precision_runtime
+from src.runtime.scan_activity_cnn_runtime import run_scan_activity_cnn_runtime
 from src.runtime.calibration_actions import (
     DEFAULT_GAIN_LIST,
     DEFAULT_GAIN_NOISE_OUTPUT,
@@ -27,6 +30,8 @@ STATUS_COMMANDS = {"c", "status"}
 NOISE_COMMANDS = {"n", "noise"}
 PHASE_COMMANDS = {"p", "phase", "phase_gain"}
 PIPELINE_COMMANDS = {"s", "start", "run", "pipeline", "a", "aoa"}
+SCAN_HANDOFF_COMMANDS = {"sf", "scan_fixed", "scan_precision", "scan_handoff"}
+FIXED_AOA_COMMANDS = {"f", "fixed", "fixed2450", "fixed_2450", "aoa_fixed"}
 TERMINAL_PIPELINE_COMMANDS = {"t", "terminal", "terminal_loop", "scan_loop"}
 DEMO_COMMANDS = {"v", "view", "viewer", "demo", "ui_demo"}
 CAPTURE_COMMANDS = {"d", "dataset", "capture"}
@@ -129,7 +134,9 @@ def print_menu() -> None:
     print("[c] status        : calibration / pipeline 현재 상태창")
     print("[n] noise         : gain-wise noise calibration")
     print("[p] phase         : gain-wise phase/gain calibration")
-    print("[s] start         : 실제 Pluto+ OpenCV SCAN + PRECISION runtime 구동")
+    print("[s] start         : clean SCAN(raw gate) + 후보 freq CNN Top5 vote 확인용, precision 진입 안 함")
+    print("[sf] scan_fixed   : clean SCAN + CNN Top5 vote 통과 시 fixed 2.450 precision 진입")
+    print("[f] fixed-2450    : SCAN 없이 2.450GHz 고정 AoA/거리 dashboard 구동")
     print("[v] view/demo     : Pluto 없이 OpenCV UI demo 구동")
     print("[t] terminal-loop : 기존 terminal scan/runtime pipeline 구동")
     print("[d] dataset       : CNN dataset capture")
@@ -139,21 +146,22 @@ def print_menu() -> None:
 
 def _run_pipeline_start_action() -> None:
     print()
-    print("=== OpenCV SCAN + PRECISION UI Start ===")
-    print("흐름: CLI [s] → OpenCV UI → SCAN rail → PRECISION sector dashboard")
+    print("=== Clean SCAN Activity + CNN Verify Only Start ===")
+    print("흐름: CLI [s] → raw gate sweep → 후보 freq CNN Top5 vote 확인, precision 진입 안 함")
     print("중단: OpenCV 창에서 q 또는 ESC")
     print()
     print_calibration_status()
 
     try:
-        return_code = run_opencv_scan_precision_runtime(
+        return_code = run_scan_activity_cnn_runtime(
+            handoff_to_precision=False,
             config_dir="configs",
             stop_key="q",
             verbose=True,
         )
 
         if return_code != 0:
-            print(f"[WARN] OpenCV runtime finished with non-zero return code: {return_code}")
+            print(f"[WARN] clean scan observe runtime finished with non-zero return code: {return_code}")
 
     except SystemExit as e:
         code = e.code
@@ -161,7 +169,58 @@ def _run_pipeline_start_action() -> None:
             print(f"[WARN] OpenCV UI finished with non-zero return code: {code}")
 
     except Exception as e:
-        print(f"[ERROR] OpenCV UI failed: {e}")
+        print(f"[ERROR] clean scan observe runtime failed: {e}")
+
+
+def _run_fixed_2450_dashboard_action() -> None:
+    print()
+    print("=== Fixed 2.450GHz AoA/Distance Dashboard Start ===")
+    print("흐름: CLI [f] → fixed2450_precision_runtime → 2.450GHz 고정 관측")
+    print("SCAN sweep / candidate selection / scan policy를 사용하지 않습니다.")
+    print("중단: OpenCV 창에서 q 또는 ESC")
+    print()
+    print_calibration_status()
+
+    try:
+        run_fixed2450_precision_runtime(
+            config_dir="configs",
+            center_freq_hz=2.450e9,
+        )
+
+    except SystemExit as e:
+        code = e.code
+        if code not in (None, 0):
+            print(f"[WARN] fixed 2.450 precision runtime finished with non-zero return code: {code}")
+
+    except Exception as e:
+        print(f"[ERROR] fixed 2.450 precision runtime failed: {e}")
+
+
+
+def _run_scan_handoff_action() -> None:
+    print()
+    print("=== Clean SCAN Activity + CNN Verify → Fixed Precision Start ===")
+    print("흐름: CLI [sf] → raw gate sweep → 후보 freq CNN Top5 vote → 통과 시 fixed 2.450 precision")
+    print("중단: OpenCV 창에서 q 또는 ESC")
+    print()
+    print_calibration_status()
+
+    try:
+        return_code = run_scan_activity_cnn_runtime(
+            handoff_to_precision=True,
+            config_dir=Path("configs"),
+            verbose=True,
+        )
+        if return_code not in (None, 0):
+            print(f"[WARN] clean scan handoff runtime finished with non-zero return code: {return_code}")
+
+    except SystemExit as e:
+        code = e.code
+        if code not in (None, 0):
+            print(f"[WARN] clean scan handoff runtime finished with non-zero return code: {code}")
+
+    except Exception as e:
+        print(f"[ERROR] clean scan handoff runtime failed: {e}")
 
 
 def _run_opencv_demo_action() -> None:
@@ -362,6 +421,9 @@ def run_cli() -> None:
 
         elif cmd in TERMINAL_PIPELINE_COMMANDS:
             _run_terminal_pipeline_action()
+
+        elif cmd in FIXED_AOA_COMMANDS:
+            _run_fixed_2450_dashboard_action()
 
         elif cmd in PIPELINE_COMMANDS:
             _run_pipeline_start_action()

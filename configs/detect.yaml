@@ -179,3 +179,22 @@ candidate_verify:
   # 대표 block 방식에서는 너무 공격적인 reset을 피하기 위해 기본 false.
   reset_temporal_on_raw_gate_fail: false
 
+
+# ============================================================
+# Clean scan-only CNN Top5 verification
+# ============================================================
+#
+# 새 [s] scan_activity_cnn_runtime.py 전용 설정.
+# scan_candidate로 올라온 후보 주파수에서 20 block을 읽고,
+# raw score Top5 block만 CNN 판정한다.
+#
+# 의미:
+# - cnn_top_m: Top5 사용
+# - cnn_vote_required: Top5 중 Drone vote 몇 개 이상이면 후보로 볼지
+# - cnn_conf_min: Drone vote로 인정할 최소 Drone probability
+#
+# 현재는 드론 OFF 환경 false positive 억제를 위해 보수적으로 설정한다.
+clean_scan:
+  cnn_top_m: 5
+  cnn_vote_required: 3
+  cnn_conf_min: 0.90
