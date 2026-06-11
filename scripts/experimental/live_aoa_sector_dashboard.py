@@ -22,6 +22,133 @@ from src.viewer import ViewerState, compute_raw_features
 from src.viewer.sector_range_estimator import SectorRangeEstimator
 from src.viewer.scan_rail import draw_scan_rail
 
+# ============================================================
+# SF auto-return print hook
+# - Enabled only when RF_SF_AUTO_RETURN=1
+# - Parses [DASH] log line directly
+# - Does NOT use p99/raw_pass absolute strength
+# - Return-to-scan when Drone or AoA/coherence is lost repeatedly
+# ============================================================
+
+def _install_sf_auto_return_print_hook() -> None:
+    import os
+    import re
+    import math
+    import builtins
+
+    if str(os.environ.get("RF_SF_AUTO_RETURN", "0")).lower() not in {"1", "true", "yes", "on"}:
+        return
+
+    if getattr(builtins.print, "_sf_auto_return_hooked", False):
+        return
+
+    original_print = builtins.print
+
+    state = {
+        "seen": 0,
+        "drone_lost": 0,
+        "aoa_lost": 0,
+    }
+
+    limit = int(os.environ.get("RF_SF_LOST_LIMIT", "5"))
+    warmup = int(os.environ.get("RF_SF_WARMUP_UPDATES", "5"))
+    min_drone = int(os.environ.get("RF_SF_MIN_DRONE", "2"))
+    min_coh = float(os.environ.get("RF_SF_MIN_COH", "0.85"))
+
+    def _field(line: str, name: str):
+        m = re.search(rf"{name}=([^ ]+)", line)
+        return m.group(1).strip() if m else None
+
+    def _to_int(x):
+        try:
+            return int(float(str(x)))
+        except Exception:
+            return None
+
+    def _to_float(x):
+        try:
+            v = float(str(x))
+            return v if math.isfinite(v) else None
+        except Exception:
+            return None
+
+    def _none_like(x) -> bool:
+        if x is None:
+            return True
+        return str(x).strip().lower() in {"", "none", "n/a", "na", "nan", "null"}
+
+    def sf_print(*args, **kwargs):
+        line = " ".join(str(a) for a in args)
+
+        original_print(*args, **kwargs)
+
+        if not line.startswith("[DASH]"):
+            return
+
+        drone = _to_int(_field(line, "drone"))
+        status = str(_field(line, "status") or "").strip().lower()
+        instant = _field(line, "instant")
+        angle_med = _field(line, "angle_med")
+        coh = _to_float(_field(line, "coh"))
+        reason = str(_field(line, "reason") or "").strip().lower()
+
+        state["seen"] += 1
+
+        # precision 진입 직후 튀는 값 무시
+        if state["seen"] <= warmup:
+            state["drone_lost"] = 0
+            state["aoa_lost"] = 0
+            return
+
+        # Drone lost: top-k drone vote 자체가 부족한 경우
+        drone_ok = True if drone is None else (drone >= min_drone)
+
+        # AoA lost:
+        # - trusted가 아니거나
+        # - instant sector 없음
+        # - angle_med 없음
+        # - coherence가 너무 낮음
+        # - no valid / votes scattered 계열이면 lost로 봄
+        instant_ok = not _none_like(instant)
+        angle_ok = not _none_like(angle_med)
+        coh_ok = True if coh is None else (coh >= min_coh)
+
+        bad_reason = ("no valid" in reason) or ("votes scattered" in reason)
+        status_ok = status == "trusted"
+
+        aoa_ok = status_ok and instant_ok and angle_ok and coh_ok and not bad_reason
+
+        if drone_ok:
+            state["drone_lost"] = 0
+        else:
+            state["drone_lost"] += 1
+
+        if aoa_ok:
+            state["aoa_lost"] = 0
+        else:
+            state["aoa_lost"] += 1
+
+        if state["drone_lost"] >= limit:
+            original_print(
+                f"[AUTO-RETURN] Drone lost {state['drone_lost']}/{limit} updates "
+                f"(drone={drone}, status={status}, reason={reason}) -> return to SCAN"
+            )
+            __import__("os").environ["RF_SF_AUTO_RETURNING"] = "1"
+            raise SystemExit(20)
+        if state["aoa_lost"] >= limit:
+            original_print(
+                f"[AUTO-RETURN] AoA/coherence lost {state['aoa_lost']}/{limit} updates "
+                f"(status={status}, instant={instant}, angle_med={angle_med}, coh={coh}, reason={reason}) -> return to SCAN"
+            )
+            raise SystemExit(20)
+
+    sf_print._sf_auto_return_hooked = True
+    builtins.print = sf_print
+
+
+_install_sf_auto_return_print_hook()
+
+
 
 def load_dashboard_cfg(args: Any) -> dict[str, Any]:
     ui_path = Path(args.config_dir) / "ui.yaml"
@@ -1486,7 +1613,7 @@ def run() -> int:
     state.phase_offset_total_deg = float(np.rad2deg(aoa_runtime.phase_offset_to_apply_rad))
 
     renderer = SectorDashboardRenderer(
-        window_name="RF Sector Dashboard",
+        window_name="RF Drone Detection Runtime",
         target_fps=args.target_fps,
         width=int(dash_cfg.get("canvas_width", 1120)),
         height=int(dash_cfg.get("canvas_height", 720)),
@@ -1764,8 +1891,14 @@ def run() -> int:
             receiver.close()
         except Exception:
             pass
-        renderer.close()
+        _exc_type, _exc, _tb = __import__("sys").exc_info()
+        _auto_return_exit = isinstance(_exc, SystemExit) and getattr(_exc, "code", None) == 20
+        _keep_window = __import__("os").environ.get("RF_SF_KEEP_WINDOW") == "1"
+        _auto_returning = __import__("os").environ.get("RF_SF_AUTO_RETURNING") == "1"
 
+        # sf auto-return이면 precision 창을 닫지 않고 scan runtime이 같은 창 이름으로 재사용하게 둔다.
+        if not (_keep_window and (_auto_returning or _auto_return_exit)):
+            renderer.close()
     return 0
 
 

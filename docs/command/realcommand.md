@@ -476,3 +476,211 @@ configs/calibration/*.json
 [나중 6]
 dashboard/viewer overlay
 → 현재 보정값과 quality 표시
+
+
+
+PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label drone_linked_g25_d3m_vertical_cf2450 \
+  --center-freq 2450000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy weak_or_valid \
+  --min-signal-ratio 2.0 \
+  --valid-signal-ratio 5.0 \
+  --max-saved 150 \
+  --until-max-saved \
+  --max-total-blocks 4000 \
+  --skip-inference
+
+
+  PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label drone_linked_g25_d3m_vertical_cf2460 \
+  --center-freq 2460000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy weak_or_valid \
+  --min-signal-ratio 2.0 \
+  --valid-signal-ratio 5.0 \
+  --max-saved 150 \
+  --until-max-saved \
+  --max-total-blocks 4000 \
+  --skip-inference
+
+
+  PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label drone_linked_g25_d3m_vertical_cf2465 \
+  --center-freq 2465000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy weak_or_valid \
+  --min-signal-ratio 2.0 \
+  --valid-signal-ratio 5.0 \
+  --max-saved 150 \
+  --until-max-saved \
+  --max-total-blocks 4000 \
+  --skip-inference
+
+
+PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label background_g25_d3m_vertical_cf2450 \
+  --center-freq 2450000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy no_signal_only \
+  --max-background-signal-ratio 1.5 \
+  --max-saved 100 \
+  --until-max-saved \
+  --max-total-blocks 5000 \
+  --start-discard-sec 0.0 \
+  --skip-inference
+
+
+
+  PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label background_g25_d3m_vertical_cf2460 \
+  --center-freq 2460000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy no_signal_only \
+  --max-background-signal-ratio 1.5 \
+  --max-saved 100 \
+  --until-max-saved \
+  --max-total-blocks 5000 \
+  --start-discard-sec 0.0 \
+  --skip-inference
+
+
+
+  PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label background_g25_d3m_vertical_cf2465 \
+  --center-freq 2465000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy no_signal_only \
+  --max-background-signal-ratio 1.5 \
+  --max-saved 100 \
+  --until-max-saved \
+  --max-total-blocks 5000 \
+  --start-discard-sec 0.0 \
+  --skip-inference
+
+1. Blink 2450MHz
+
+조종기 꺼둔 상태에서 명령어 먼저 실행 → 저장 대기 시작되면 조종기 ON.
+
+PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label drone_controller_blink_ref_g25_d1m_vertical_cf2450 \
+  --center-freq 2450000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy weak_or_valid \
+  --min-signal-ratio 1.3 \
+  --valid-signal-ratio 2.5 \
+  --max-saved 50 \
+  --until-max-saved \
+  --max-total-blocks 1500 \
+  --start-discard-sec 0.0 \
+  --skip-inference
+
+3. Blink 2465MHz
+PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label drone_controller_blink_ref_g25_d1m_vertical_cf2465 \
+  --center-freq 2465000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy weak_or_valid \
+  --min-signal-ratio 1.3 \
+  --valid-signal-ratio 2.5 \
+  --max-saved 50 \
+  --until-max-saved \
+  --max-total-blocks 1500 \
+  --start-discard-sec 0.0 \
+  --skip-inference
+
+PYTHONPATH=. python scripts/capture_rf4_fixed_freq_dataset.py \
+  --label drone_controller_blink_rawp99gt4p5_g25_d3m_vertical_cf2450 \
+  --center-freq 2450000000 \
+  --gain 25 \
+  --rx-index 0 \
+  --save-policy weak_or_valid \
+  --min-raw-p99 4.5 \
+  --max-saved 50 \
+  --until-max-saved \
+  --max-total-blocks 2000 \
+  --start-discard-sec 0.0 \
+  --skip-inference
+
+
+
+
+
+  PYTHONPATH=. python scripts/live_cnn_spectrogram_viewer_yaml_drone_aoa.py \
+  --decision-mode hybrid \
+  --gain 40 \
+  --center-freq 2450000000 \
+  --blocks-per-update 20 \
+  --update-interval-sec 1.0
+
+
+  PYTHONPATH=. python scripts/live_rf_viewer_drone_aoa.py --mode full
+
+  aoa_gate:
+  enabled: true   #aoa게이트 전원
+  require_voting_confirmed: false  #true하면 cnn게이팅들어감
+  require_current_drone: false
+  min_current_confidence: 0.00
+  min_coherence: 0.90
+  display_only_valid: true
+  show_skip_reason: true
+
+
+   PYTHONPATH=. python -m src.runtime.cli
+
+
+  
+
+평소/현장 기본 실행:
+PYTHONPATH=. python scripts/experimental/live_aoa_sector_experiment.py --gain 35
+
+YAML까지 gain=35로 맞춘 뒤:
+PYTHONPATH=. python scripts/experimental/live_aoa_sector_experiment.py
+
+플루토 없는 테스트:
+PYTHONPATH=. python scripts/experimental/live_aoa_sector_experiment.py --source-type sim --cnn-backend dummy --cnn-dummy-class-name Drone --disable-raw-gate
+
+
+
+PYTHONPATH=. python scripts/experimental/live_aoa_sector_experiment_capture.py \
+  --gain 35 \
+  --distance-m 3 \
+  --true-angle-deg 0 \
+  --capture-trusted-n 30 \
+  --memo "CENTER_3m_gain35"
+
+aoa secter
+
+PYTHONPATH=. python scripts/experimental/live_aoa_sector_dashboard.py \
+  --source-type sdr \
+  --gain 35 \
+  --center-freq 2450000000 \
+  --target-fps 5
+
+
+  cd ~/projects/rf-drone-detection-capstone
+
+
+
+PYTHONPATH=. python scripts/experimental/live_aoa_sector_dashboard.py \
+  --source-type sim \
+  --cnn-backend dummy \
+  --cnn-dummy-class-name Drone \
+  --cnn-dummy-confidence 1.0 \
+  --disable-raw-gate \
+  --target-fps 5
+
+기존데이터로 리플레이
+  PYTHONPATH=. python scripts/experimental/replay_sector_profile_dashboard.py \
+  --fps 2 \
+  --only-trusted
+
+  

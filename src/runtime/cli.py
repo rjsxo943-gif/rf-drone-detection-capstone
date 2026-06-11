@@ -208,7 +208,8 @@ def _run_scan_handoff_action() -> None:
     try:
         return_code = run_scan_activity_cnn_runtime(
             handoff_to_precision=True,
-            config_dir=Path("configs"),
+            config_dir="configs",
+            stop_key="q",
             verbose=True,
         )
         if return_code not in (None, 0):
@@ -421,6 +422,9 @@ def run_cli() -> None:
 
         elif cmd in TERMINAL_PIPELINE_COMMANDS:
             _run_terminal_pipeline_action()
+
+        elif cmd in SCAN_HANDOFF_COMMANDS:
+            _run_scan_handoff_action()
 
         elif cmd in FIXED_AOA_COMMANDS:
             _run_fixed_2450_dashboard_action()

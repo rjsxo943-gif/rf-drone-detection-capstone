@@ -5,6 +5,32 @@ from typing import Iterable
 
 import numpy as np
 
+def _center_opencv_window(window_name: str, width: int, height: int) -> None:
+    """OpenCV window를 화면 중앙 근처로 이동한다."""
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        root.destroy()
+    except Exception:
+        screen_w = 1920
+        screen_h = 1080
+
+    x = max(0, int((screen_w - width) / 2))
+    y = max(0, int((screen_h - height) / 2))
+
+    try:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, width, height)
+        cv2.moveWindow(window_name, x, y)
+    except Exception:
+        pass
+
+
+
 
 class OpenCVRenderer:
     """Small OpenCV wrapper for low-latency spectrogram display.
@@ -55,6 +81,11 @@ class OpenCVRenderer:
         else:
             frame = spectrogram_frame
             self._draw_overlay(frame, overlay_lines)
+
+        if not getattr(self, "_window_positioned", False):
+            h, w = frame.shape[:2]
+            _center_opencv_window(self.window_name, w, h)
+            self._window_positioned = True
 
         cv2.imshow(self.window_name, frame)
         key = cv2.waitKey(1) & 0xFF

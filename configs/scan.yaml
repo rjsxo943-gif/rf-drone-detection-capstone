@@ -49,7 +49,7 @@ scan:
       # 현재 2.460/2.465 GHz 드론 데이터를 아직 학습에 충분히 넣지 않았으므로
       # 임시로 0.35부터 시작한다. 데이터 보강 후 0.65~0.80으로 올릴 수 있다.
       accept_raw_drone_hit: true
-      entry_probability_threshold: 0.35
+      entry_probability_threshold: 0.80
       require_raw_gate_passed: true
 
       reject_not_drone: true

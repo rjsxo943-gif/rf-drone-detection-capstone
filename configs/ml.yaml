@@ -104,7 +104,49 @@ raw_safety:
 
 model:
   type: binary_2d_cnn
-  binary_model_path: outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt
+
+  # ----------------------------------------------------------
+  # RF4 Binary CNN model candidates
+  # ----------------------------------------------------------
+  #
+  # [OLD / baseline model]
+  # - 2026-05-30 기존 binary 모델
+  # - 기존 2.450GHz linked 데이터에서는 안정적
+  # - 2026-06-04 외부 테스트 결과:
+  #   * cf2450 Drone detect: 74/80 = 92.50%
+  #   * cf2460 Drone detect: 136/150 = 90.67%
+  #   * cf2465 Drone detect: 116/150 = 77.33%
+  #   * 0604 background cf2450/cf2460/cf2465 FP: 0%
+  #
+  # OLD path:
+  # outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt
+  #
+  # [NEW / selected freqboost model]
+  # - 2026-06-04 frequency boost fine-tuned model
+  # - 기존 모델에서 fine-tuning
+  # - 2.460 / 2.465GHz Drone-like 보강 목적
+  # - best epoch: 9
+  # - validation:
+  #   * val_acc: 0.9937
+  #   * DroneAcc: 0.9871
+  #   * NotDroneAcc: 1.0000
+  #   * FP_Drone: 0.0000
+  #   * MissDrone: 0.0129
+  # - 2026-06-04 외부 테스트 결과:
+  #   * cf2450 Drone detect: 74/80 = 92.50%
+  #   * cf2460 Drone detect: 143/150 = 95.33%
+  #   * cf2465 Drone detect: 139/150 = 92.67%
+  #   * 0604 background cf2450/cf2460/cf2465 FP: 0%
+  #
+  # NEW path:
+  # outputs/ml/rf4_binary_20260604_freqboost_2460_2465_finetune_v1/best_model.pt
+  #
+  # 선택 방법:
+  # - 이전 모델을 쓰고 싶으면 binary_model_path와 inference.model_path를 OLD path로 변경
+  # - 새 모델을 쓰고 싶으면 binary_model_path와 inference.model_path를 NEW path로 유지
+  # - runtime에서는 inference.model_path를 우선 사용한다.
+
+  binary_model_path: outputs/ml/rf4_binary_20260604_freqboost_2460_2465_finetune_v1/best_model.pt
 
   # legacy / unused paths. 유지하되 runtime에서는 inference.model_path를 우선 사용한다.
   model_path: models/checkpoints/model.keras
@@ -130,29 +172,88 @@ export:
 inference:
   # Drone / NotDrone binary classifier
   backend: binary_flat
+
+  # ----------------------------------------------------------
+  # Runtime model selection
+  # ----------------------------------------------------------
+  #
+  # [OLD model]
+  # outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt
+  #
+  # 특징:
+  # - 기존 2.45GHz linked 데이터 기준 안정적
+  # - cf2465에서는 Drone detect 77.33%로 낮았음
+  #
+  # [NEW selected model]
+  # outputs/ml/rf4_binary_20260604_freqboost_2460_2465_finetune_v1/best_model.pt
+  #
+  # 특징:
+  # - 2.460 / 2.465GHz 보강 fine-tuning 모델
+  # - cf2460 detect: 90.67% -> 95.33%
+  # - cf2465 detect: 77.33% -> 92.67%
+  # - 0604 background FP: 0% 유지
+  #
+  # 현재 선택:
+  # - 기본값은 NEW selected model 사용
+  # - 이전 모델로 되돌리고 싶으면 아래 model_path만 OLD path로 바꾼다.
   model_path: outputs/ml/rf4_binary_20260530_no_controller_lr1e3_v2/best_model.pt
+
   device: cpu
 
-  # fallback threshold. gain별 policy에 매칭되지 않으면 이 값을 사용한다.
-  drone_threshold: 0.50
+  # ----------------------------------------------------------
+  # CNN decision threshold
+  # ----------------------------------------------------------
+  # 기존 기본값은 0.50이었음.
+  #
+  # 2026-06-04 threshold sweep 결과:
+  # - threshold 0.50:
+  #   * 0528 background FP: 151/870 = 17.36%
+  #   * 0528 drone detect: 100/100 = 100%
+  # - threshold 0.70:
+  #   * 0528 background FP: 3/870 = 0.34%
+  #   * 0528 drone detect: 100/100 = 100%
+  # - threshold 0.80:
+  #   * 0528 background FP: 0/870 = 0%
+  #   * 0528 drone detect: 100/100 = 100%
+  #
+  # 단일 block 판정만 사용할 경우:
+  # - 보수적 운용: drone_threshold = 0.80
+  #
+  # temporal voting을 함께 사용할 경우:
+  # - 추천 운용: drone_threshold = 0.70
+  # - 최근 5 frame 중 3 frame 이상 Drone이면 confirmed
+  drone_threshold: 0.70
   general_threshold: 0.50
 
   # ----------------------------------------------------------
   # Gain-dependent Drone threshold policy
   # ----------------------------------------------------------
-  # gain < 25        -> 0.50
-  # 25 <= gain < 30  -> 0.35
-  # gain >= 30       -> 0.80
-  # ----------------------------------------------------------
+  # 주의:
+  # - 아래 gain_threshold_policy가 enabled: true이면
+  #   위 drone_threshold보다 gain별 threshold가 우선 적용될 수 있다.
+  #
+  # 기존 정책:
+  # - gain < 25        -> 0.50
+  # - 25 <= gain < 30  -> 0.35
+  # - gain >= 30       -> 0.80
+  #
+  # 2026-06-04 새 모델 기준:
+  # - g25 조건에서 threshold 0.70 + temporal voting이 안정적이었음.
+  # - 따라서 g25 sensitive threshold 0.35는 새 모델에서는 너무 낮을 수 있음.
+  #
+  # 현재 정책:
+  # - 기본 threshold: 0.70
+  # - gain 25~29.999: 0.70
+  # - gain 30 이상: 0.80
   gain_threshold_policy:
     enabled: true
-    default_drone_threshold: 0.50
+    default_drone_threshold: 0.70
 
     rules:
-      - name: gain_25_sensitive
+      - name: gain_25_freqboost_selected
         min_gain: 25
         max_gain: 29.999
-        drone_threshold: 0.35
+        drone_threshold: 0.70
 
       - name: gain_30_or_higher_strict
         min_gain: 30
@@ -163,11 +264,25 @@ inference:
   # Temporal voting
   # ----------------------------------------------------------
   # 단일 block만 보고 Drone 확정하지 않는다.
-  # 최근 5개 precision/viewer decision 중:
-  # - 2개 이상 Drone이면 candidate
-  # - 3개 이상 Drone이면 confirmed
+  #
+  # 추천 운용값:
+  # - drone_prob >= 0.70이면 raw Drone 후보
+  # - 최근 5 frame 중 3 frame 이상 Drone 후보이면 confirmed Drone
+  #
+  # 2026-06-04 temporal voting sweep 결과:
+  # - threshold 0.70, window 3, vote 2:
+  #   * background FP rate = 0.0000
+  #   * drone detect rate = 1.0000
+  # - threshold 0.70, window 5, vote 3:
+  #   * background FP rate = 0.0000
+  #   * drone detect rate = 1.0000
+  #
+  # 선택 기준:
+  # - 빠른 반응성 우선: window_size 3, confirmed_vote_k 2
+  # - 안정성 우선: window_size 5, confirmed_vote_k 3
+  #
+  # 현재 설정은 안정성 우선.
   # AoA는 confirmed 이후에만 실행한다.
-  # ----------------------------------------------------------
   temporal_voting:
     enabled: true
     window_size: 5

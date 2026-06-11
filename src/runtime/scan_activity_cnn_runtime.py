@@ -346,7 +346,7 @@ def run_scan_activity_cnn_runtime(
     dash_cfg = load_dashboard_cfg(args)
 
     renderer = SectorDashboardRenderer(
-        window_name="RF SCAN Activity + CNN Verify",
+        window_name="RF Drone Detection Runtime",
         target_fps=5.0,
         width=int(dash_cfg.get("canvas_width", 1320)),
         height=int(dash_cfg.get("canvas_height", 720)),
@@ -592,7 +592,9 @@ def run_scan_activity_cnn_runtime(
 
     finally:
         try:
-            renderer.close()
+            # sf handoff 시에는 OpenCV window를 유지해서 fixed precision이 같은 창을 재사용하게 한다.
+            if not (handoff_to_precision and detected is not None):
+                renderer.close()
         finally:
             close_fn = getattr(receiver, "close", None)
             if callable(close_fn):
@@ -610,10 +612,49 @@ def run_scan_activity_cnn_runtime(
         print("[HANDOFF] SCAN receiver closed. Starting fixed 2.450GHz precision runtime.")
         print()
 
-        run_fixed2450_precision_runtime(
-            config_dir=str(config_dir),
-            center_freq_hz=fixed_freq,
+        import os as _os
+
+        _sf_env_keys = (
+            "RF_SF_AUTO_RETURN",
+            "RF_SF_LOST_LIMIT",
+            "RF_SF_WARMUP_UPDATES",
+            "RF_SF_MIN_DRONE",
+            "RF_SF_MIN_COH",
+            "RF_SF_KEEP_WINDOW",
+            "RF_SF_AUTO_RETURNING",
         )
+        _sf_old_env = {k: _os.environ.get(k) for k in _sf_env_keys}
+
+        try:
+            _os.environ["RF_SF_AUTO_RETURN"] = "1"
+            _os.environ["RF_SF_LOST_LIMIT"] = "5"
+            _os.environ["RF_SF_WARMUP_UPDATES"] = "5"
+            _os.environ["RF_SF_MIN_DRONE"] = "2"
+            _os.environ["RF_SF_MIN_COH"] = "0.85"
+            _os.environ["RF_SF_KEEP_WINDOW"] = "1"
+            _os.environ["RF_SF_AUTO_RETURNING"] = "0"
+            run_fixed2450_precision_runtime(
+                config_dir=str(config_dir),
+                center_freq_hz=fixed_freq,
+            )
+
+        except SystemExit as _e:
+            if _e.code == 20:
+                print("[HANDOFF] Fixed precision reported signal/AoA lost. Returning to SCAN mode.")
+                return run_scan_activity_cnn_runtime(
+                    handoff_to_precision=True,
+                    config_dir=config_dir,
+                    stop_key=stop_key,
+                    verbose=verbose,
+                )
+            raise
+
+        finally:
+            for _k, _v in _sf_old_env.items():
+                if _v is None:
+                    _os.environ.pop(_k, None)
+                else:
+                    _os.environ[_k] = _v
 
     return int(return_code)
 

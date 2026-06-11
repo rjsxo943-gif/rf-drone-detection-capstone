@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument("--init-model", default=None, help="Optional checkpoint path to initialize/fine-tune from")
     return parser.parse_args()
 
 
@@ -350,6 +351,15 @@ def main() -> None:
     )
 
     model = SmallRFBinaryCNN(num_classes=2).to(device)
+
+    if args.init_model is not None:
+        init_path = Path(args.init_model)
+        if not init_path.exists():
+            raise FileNotFoundError(f"init model not found: {init_path}")
+        checkpoint = torch.load(init_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"[INFO] loaded init model: {init_path}")
+
 
     class_weights = make_class_weights(train_samples, device=device)
     print(f"class_weights: NotDrone={class_weights[0].item():.4f}, Drone={class_weights[1].item():.4f}")
