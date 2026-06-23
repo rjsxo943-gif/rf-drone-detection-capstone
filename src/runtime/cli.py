@@ -131,17 +131,16 @@ def print_calibration_status() -> None:
 def print_menu() -> None:
     print()
     print("=== RF Drone Detection Runtime CLI ===")
-    print("[c] status        : calibration / pipeline 현재 상태창")
-    print("[n] noise         : gain-wise noise calibration")
-    print("[p] phase         : gain-wise phase/gain calibration")
-    print("[s] start         : clean SCAN(raw gate) + 후보 freq CNN Top5 vote 확인용, precision 진입 안 함")
-    print("[sf] scan_fixed   : clean SCAN + CNN Top5 vote 통과 시 fixed 2.450 precision 진입")
-    print("[f] fixed-2450    : SCAN 없이 2.450GHz 고정 AoA/거리 dashboard 구동")
-    print("[v] view/demo     : Pluto 없이 OpenCV UI demo 구동")
-    print("[t] terminal-loop : 기존 terminal scan/runtime pipeline 구동")
-    print("[d] dataset       : CNN dataset capture")
-    print("[r] rf4           : RF4 single block inference")
-    print("[q] quit/shutdown : receiver close 후 종료")
+    print("[c] Status       ")
+    print("[n] Noise Cal    ")
+    print("[p] Phase Cal    ")
+    print("[s] Scan         ")
+    print("[sf] Auto Track  ")
+    print("[f] AoA Tracking ")
+    print("[v] Demo         ")
+    print("[t] Terminal     ")
+    print("[d] Dataset      ")
+    print("[q] Quit         ")
 
 
 def _run_pipeline_start_action() -> None:

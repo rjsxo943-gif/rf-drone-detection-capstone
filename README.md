@@ -117,8 +117,8 @@ Gain-wise Calibration
    - 같은 주파수에서 즉시 recheck 수행
    - first vote와 recheck가 모두 통과해야 handoff 후보로 인정
 
-4. Fixed 2.450GHz Precision Mode
-   - scan 후보가 통과하면 fixed 2.450GHz precision dashboard 진입
+4. Precision Mode
+   - scan 후보가 통과하면 precision dashboard 진입
    - CNN TopK / AoA / sector / range 추정
    - AoA/coherence lost가 연속 누적되면 scan으로 자동 복귀
 ```
@@ -146,7 +146,7 @@ flowchart TD
 
     G --> G1{Recheck Passed?}
     G1 -- No --> D
-    G1 -- Yes --> H[Fixed 2.450GHz Precision]
+    G1 -- Yes --> H[Precision]
 
     H --> I[AoA / Sector / Range Tracking]
     I --> J{Signal / AoA Lost?}
@@ -172,7 +172,7 @@ CLI 메뉴 및 운용 모드는 다음과 같습니다.
 [n] noise         : gain-wise noise calibration
 [p] phase         : gain-wise phase/gain calibration
 [s] scan          : clean scan observe only
-[sf] scan-fixed   : clean scan → fixed 2.450GHz precision handoff
+[sf] scan         : clean scan → precision handoff
 [f] fixed         : fixed 2.450GHz precision dashboard 직접 실행
 [v] view/demo     : Pluto 없이 OpenCV UI demo 구동
 [t] terminal-loop : 기존 terminal scan/runtime pipeline 구동
@@ -189,8 +189,8 @@ CLI 메뉴 및 운용 모드는 다음과 같습니다.
 | `n` | Noise calibration | gain별 background noise profile 생성 |
 | `p` | Phase/gain calibration | gain별 RX0/RX1 phase offset 및 gain correction 생성 |
 | `s` | Clean scan | RawNoiseGate + CNN verify로 후보 탐색만 수행, precision 진입 없음 |
-| `sf` | Scan-fixed handoff | scan 후보 검증 후 fixed 2.450GHz precision 진입, lost 시 scan 복귀 |
-| `f` | Fixed precision | scan 없이 fixed 2.450GHz AoA/Sector dashboard 직접 실행 |
+| `sf` | Scan handoff | scan 후보 검증 후 precision 진입, lost 시 scan 복귀 |
+| `f` | precision | scan 없이 fixed 2.450GHz AoA/Sector dashboard 직접 실행 |
 | `v` | UI demo | Pluto+ 없이 SCAN rail / PRECISION dashboard 화면만 확인 |
 | `t` | Terminal loop | 기존 terminal 로그 기반 scan/runtime pipeline 실행 |
 | `d` | Dataset capture | CNN 학습용 spectrogram / raw IQ 데이터 수집 |
@@ -1029,7 +1029,7 @@ while running:
 3. RawNoiseGate 기반 scan candidate 탐색
 4. CNN Top5 vote 기반 후보 검증
 5. Same-frequency immediate recheck 기반 오탐 억제
-6. Fixed 2.450GHz precision AoA 추적
+6. 2.450GHz precision AoA 추적
 7. RX0/RX1 위상차 기반 AoA 추정
 8. Coherence 기반 신뢰도 검증
 9. Fixed-bin sector consensus
