@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from scripts.experimental.live_aoa_sector_dashboard import (
+from src.viewer.live_aoa_sector_dashboard import (
     SectorDashboardRenderer,
     load_dashboard_cfg,
 )
