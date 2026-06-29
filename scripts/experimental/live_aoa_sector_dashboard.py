@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import math
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,8 +17,6 @@ from scripts.experimental import live_aoa_sector_experiment_capture as base
 from src.preprocess.dc_blocker import remove_dc_offset
 from src.runtime.raw_noise_gate import RawNoiseGate
 from src.viewer import ViewerState, compute_raw_features
-from src.viewer.sector_range_estimator import SectorRangeEstimator
-from src.viewer.scan_rail import draw_scan_rail
 
 # ============================================================
 # SF auto-return print hook
@@ -33,7 +29,6 @@ from src.viewer.scan_rail import draw_scan_rail
 def _install_sf_auto_return_print_hook() -> None:
     import os
     import re
-    import math
     import builtins
 
     if str(os.environ.get("RF_SF_AUTO_RETURN", "0")).lower() not in {"1", "true", "yes", "on"}:
