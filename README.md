@@ -21,6 +21,14 @@ Pluto+ SDR IQ Acquisition
 
 ---
 
+## Demo
+
+![Runtime Dashboard](assets/dashboard_scan_precision.png)
+
+> OpenCV 기반 scan / precision dashboard를 통해 RF activity 탐지, AoA/Sector 추정, experimental range indication 상태를 실시간으로 확인합니다.
+
+---
+
 ## 1. Project Overview
 
 2.4GHz ISM band에는 드론 조종 신호뿐 아니라 Wi-Fi, Bluetooth 등 다양한 간섭 신호가 함께 존재합니다.
@@ -60,6 +68,8 @@ Pluto+ SDR IQ Acquisition
 ---
 
 ## 3. System Architecture
+
+![System Architecture](assets/system_architecture_from_poster.png)
 
 ```mermaid
 flowchart TD
@@ -181,6 +191,8 @@ RawNoiseGate는 정규화된 spectrogram이 아니라 **DC 제거 후 raw IQ ene
 
 ### 7.2 CNN Verification
 
+![CNN Decision Policy](assets/cnn_policy_from_poster.png)
+
 CNN은 STFT spectrogram을 입력으로 받아 Drone / NotDrone을 판정합니다.
 
 단일 block 결과만 사용하지 않고, raw score 상위 block을 대상으로 Top5 vote를 수행합니다.
@@ -217,6 +229,8 @@ Range output은 정확한 거리 회귀 모델이 아니라, sector별 raw featu
 ---
 
 ## 8. Validation Summary
+
+![Validation Result Table](assets/result_table_from_poster.png)
 
 최종 단계에서 다음 항목을 검증했습니다.
 
@@ -364,6 +378,8 @@ Implemented scope:
 면접/자소서용 정리는 다음 문서에 있습니다.
 
 - [Project Story for Interview](docs/interview/project_story.md)
+
+---
 
 ---
 
