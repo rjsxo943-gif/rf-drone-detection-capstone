@@ -381,8 +381,6 @@ Implemented scope:
 
 ---
 
----
-
 ## 15. Detailed Documentation
 
 | Document | Purpose |
