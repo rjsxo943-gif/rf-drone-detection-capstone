@@ -109,3 +109,6 @@ data/raw_iq/mavic/
 data/processed/mavic_auto*/
 data/processed/spectrograms/
 outputs/
+
+# Windows 보안 메타데이터
+*Zone.Identifier
